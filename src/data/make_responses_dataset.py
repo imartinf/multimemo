@@ -51,7 +51,7 @@ def main(config_filepath, input_filepath, output_path, temperature):
     gptconfig['TEMPERATURE'] = temperature
     base_prompt = PROMPTS['mem_exp']
 
-    chatgpt = ChatGPT(gptconfig)
+    chatgpt = ChatGPT(gptconfig,logger)
 
     # Get split from filename
     split = os.path.basename(input_filepath).split('_')[1]
@@ -65,7 +65,7 @@ def main(config_filepath, input_filepath, output_path, temperature):
     data['responses'] = ''
 
     for i, row in tqdm(data.iterrows(), total=len(data), desc='Generating responses'):
-        responses = get_responses(row, chatgpt, logger, base_prompt)
+        responses = chatgpt.get_responses(row, base_prompt)
         # Save response in json file
         for k, response in responses:
             try:
@@ -78,7 +78,7 @@ def main(config_filepath, input_filepath, output_path, temperature):
 
     # Second pass for solving errors
     for i, row in tqdm(data.iterrows(), total=len(data), desc='Generating responses (2nd pass)'):
-        responses = retry_get_responses_if_error_in_response(row, chatgpt, logger, base_prompt)
+        responses = chatgpt.retry_get_responses_if_error_in_response(row, chatgpt, logger, base_prompt)
         # Save response in json file
         for k, response in responses:
             try:
