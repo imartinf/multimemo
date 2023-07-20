@@ -1,11 +1,9 @@
 import copy
 import time
-import numpy as np
 import openai
 from logging import Logger
 from src.tools.response import Response
 
-from src.tools.utils import save_json
 
 class ChatGPT:
     """
@@ -80,20 +78,20 @@ class ChatGPT:
                 except Exception as e:
                     self.logger.error("Error in response")
                     self.logger.error('Attempt: ' + str(attempt))
-                    retry = self._exception_handler(e, row, prompt, self.logger)
+                    retry = self._exception_handler(e, row, prompt)
                     if retry:
                         continue
                     else:
-                        response = {'choices': [{'message': {'content': 'Error in response'}}]}
+                        response = Response({'choices': [{'message': {'content': 'Error in response'}}]})
                         break       
                 else:
                     break
             else:
-                response = {'choices': [{'message': {'content': 'Error in response'}}]}
+                response = Response({'choices': [{'message': {'content': 'Error in response'}}]})
             responses.append(response)
         return responses
     
-    def retry_get_responses_if_error_in_response(self, row, chatgpt, base_prompt):
+    def retry_get_responses_if_error_in_response(self, row, base_prompt):
         responses = []
         recaptions = row['recaptions']
         captions = row['captions']
@@ -103,73 +101,73 @@ class ChatGPT:
                 prompt[1]['content'] = prompt[1]['content'].format(caption=captions[i], actions=row['actions'])
                 for attempt in range(3):
                     try:
-                        response = chatgpt._get_response(prompt)
+                        response = self._get_response(prompt)
                     except Exception as e:
                         self.logger.error("Error in response")
                         self.logger.error('Attempt: ' + str(attempt))
-                        retry = self._exception_handler(e, row, prompt, self.logger)
+                        retry = self._exception_handler(e, row, prompt)
                         if retry:
                             continue
                         else:
-                            response = {'choices': [{'message': {'content': 'Error in response'}}]}
+                            response = Response({'choices': [{'message': {'content': 'Error in response'}}]})
                             break       
                     else:
                         break
                 else:
-                    response = {'choices': [{'message': {'content': 'Error in response'}}]}
+                    response = Response({'choices': [{'message': {'content': 'Error in response'}}]})
             else:
                 response = row['responses'][i]
             responses.append(response)
         return responses
     
-    def _exception_handler(self, e, row, prompt, logger):
+    def _exception_handler(self, e, row, prompt):
         # Print wich row caused the error
-        logger.error(row)
+        self.logger.error(row)
         # Print the prompt that caused the error
-        logger.error(prompt)
+        self.logger.error(prompt)
         if isinstance(e, openai.error.APIError): # type: ignore
             # Handle API error
-            logger.error("An `APIError` indicates that something went wrong on our side when processing your request. This could be due to a temporary error, a bug, or a system outage.")
-            logger.error(e)
+            self.logger.error("An `APIError` indicates that something went wrong on our side when processing your request. This could be due to a temporary error, a bug, or a system outage.")
+            self.logger.error(e)
             # Wait 10 seconds and go back to the try line
-            logger.error("Waiting 10 seconds and trying again...")
+            self.logger.error("Waiting 10 seconds and trying again...")
             time.sleep(10)
             return True
         elif isinstance(e, openai.error.AuthenticationError): # type: ignore
             # Handle authentication error
-            logger.error("An `AuthenticationError` indicates that your API key is missing or invalid.")
-            logger.error(e)
+            self.logger.error("An `AuthenticationError` indicates that your API key is missing or invalid.")
+            self.logger.error(e)
             return False
         elif isinstance(e, openai.error.InvalidRequestError): # type: ignore
             # Handle invalid request error
-            logger.error("An `InvalidRequestError` indicates that your request is invalid, generally due to invalid parameters.")
-            logger.error(e)
+            self.logger.error("An `InvalidRequestError` indicates that your request is invalid, generally due to invalid parameters.")
+            self.logger.error(e)
             return True
         elif isinstance(e, openai.error.RateLimitError): # type: ignore
             # Handle rate limit error
-            logger.error("A `RateLimitError` indicates that you've hit a rate limit.")
-            logger.error(e)
-            logger.error("Waiting 1 minute to reset the rate limit...")
+            self.logger.error("A `RateLimitError` indicates that you've hit a rate limit.")
+            self.logger.error(e)
+            self.logger.error("Waiting 1 minute to reset the rate limit...")
             time.sleep(60)
             return True
         elif isinstance(e, openai.error.Timeout): # type: ignore
             # Handle timeout error
-            logger.error("A `Timeout` indicates that the request timed out.")
-            logger.error(e)
+            self.logger.error("A `Timeout` indicates that the request timed out.")
+            self.logger.error(e)
             # Wait 10 seconds and go back to the try line
-            logger.error("Waiting 10 seconds and trying again...")
+            self.logger.error("Waiting 10 seconds and trying again...")
             time.sleep(10)
             return True
         elif isinstance(e, openai.error.ServiceUnavailableError): # type: ignore
             # Handle service unavailable error
-            logger.error("A `ServiceUnavailableError` indicates that we're experiencing unexpected technical difficulties.")
-            logger.error(e)
+            self.logger.error("A `ServiceUnavailableError` indicates that we're experiencing unexpected technical difficulties.")
+            self.logger.error(e)
             # Wait 3 minutes and go back to the try line
-            logger.error("Waiting 3 minutes and trying again...")
+            self.logger.error("Waiting 3 minutes and trying again...")
             time.sleep(180)
             return True
         else:
             # Handle generic OpenAI error
-            logger.error("An unexpected error occurred.")
-            logger.error(e)
+            self.logger.error("An unexpected error occurred.")
+            self.logger.error(e)
             return False
