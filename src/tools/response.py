@@ -1,9 +1,11 @@
+import json
 import re
 import numpy as np
 
 class Response:
     def __init__(self, response):
         self.response = response
+        self.index = 0
         self.text = self.get_text()
         self.score = self.get_score()
         self.tokens = self.get_tokens()
@@ -24,3 +26,22 @@ class Response:
             return self.response['usage']['total_tokens']
         else:
             return 0
+        
+    def save_json(self, filepath):
+        with open(filepath, 'w') as f:
+            json.dump(self.response, f, indent=4)
+        
+    def __repr__(self):
+        return f"Response(text={self.text}, score={self.score}, tokens={self.tokens})"
+    
+    def __str__(self):
+        return f"Response(text={self.text}, score={self.score}, tokens={self.tokens})"
+    
+    def __print__(self):
+        return f"Response(text={self.text}, score={self.score}, tokens={self.tokens})"
+
+    
+    
+    
+
+    

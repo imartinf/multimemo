@@ -116,7 +116,7 @@ class ChatGPT:
                 else:
                     response = Response({'choices': [{'message': {'content': 'Error in response'}}]})
             else:
-                response = row['responses'][i]
+                response = Response(row['responses'][i])
             responses.append(response)
         return responses
     
