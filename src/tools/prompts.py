@@ -80,7 +80,7 @@ PROMPTS = {
         - Caption: An obscure video of clouds creeping in into the city while cars drive by.
         - Actions: heading, driving
 
-        I would like you to provide an alternative caption to the following video that is more aligned with the memorability task. You must describe the video in a concise and accurate way but using a vocabulary that conveys wether the video might have a high or low memorability, depending on its score (which is provided). Take into account that the lowest score is 0.4 and the highest is 1, and most videos have scores around 0.8 You must not describe anything that is not mentioned in the original caption. Use a similar number of tokens as the original caption. This is your first example:
+        I would like you to provide an alternative caption to the following video that is more aligned with the memorability task. You must describe the video in a concise and accurate way but using a vocabulary that conveys the how memorable the video is, depending on its score (which is provided). Take into account that the lowest score is 0.4 and the highest is 1, and most videos have scores around 0.8 You must not describe anything that is not mentioned in the original caption. Use a similar number of tokens as the original caption. Here is your original data:
 
         - Memorability score: {score}
         - Caption: {caption}.

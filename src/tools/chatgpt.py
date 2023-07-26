@@ -71,7 +71,10 @@ class ChatGPT:
             prompt = copy.deepcopy(base_prompt)
             # prompt.append({"role": "user", "content": f"- Caption: {caption}"})
             # prompt.append({"role": "user", "content": f"- Actions: {row['actions']}"})
-            prompt[1]['content'] = prompt[1]['content'].format(caption=caption, actions=row['actions'])
+            if '{score}' in prompt[1]['content']:
+                prompt[1]['content'] = prompt[1]['content'].format(score=row['mem_score'], caption=caption, actions=row['actions'])
+            else:
+                prompt[1]['content'] = prompt[1]['content'].format(caption=caption, actions=row['actions'])
             for attempt in range(3):
                 try:
                     response = self._get_response(prompt)
@@ -98,7 +101,10 @@ class ChatGPT:
         for i, recaption in enumerate(recaptions):
             if recaption == 'Error in response' or recaption == '':
                 prompt = copy.deepcopy(base_prompt)
-                prompt[1]['content'] = prompt[1]['content'].format(caption=captions[i], actions=row['actions'])
+                if '{score}' in prompt[1]['content']:
+                    prompt[1]['content'] = prompt[1]['content'].format(score=row['mem_score'], caption=captions[i], actions=row['actions'])
+                else:
+                    prompt[1]['content'] = prompt[1]['content'].format(caption=captions[i], actions=row['actions'])
                 for attempt in range(3):
                     try:
                         response = self._get_response(prompt)

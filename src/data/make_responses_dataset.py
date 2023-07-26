@@ -19,7 +19,8 @@ from src.tools.utils import *
 @click.argument('output_path', type=click.Path(exists=True))
 @click.argument('prompt_name', type=click.STRING)
 @click.option('-temperature', default=0.9, help='The temperature to use for the response generation.')
-def main(exp_name, input_filepath, output_path, prompt_name, temperature):
+@click.option('-debug', default=False, help='Whether to run in debug mode.')
+def main(exp_name, input_filepath, output_path, prompt_name, temperature, debug):
     """ 
     Script to automatically generate responses using ChatGPT using a dataset of original captions and a prompt.
 
@@ -71,7 +72,8 @@ def main(exp_name, input_filepath, output_path, prompt_name, temperature):
     tqdm.pandas(desc='Processing action keywords')
     data['actions'] = data['action_labels'].progress_apply(lambda x: ' '.join(x).replace('+', ' '))
     # Subset for debugging
-    data = data.sample(3, random_state=42)
+    if debug:
+        data = data.sample(3, random_state=42)
 
     data['responses'] = ''
     data['total_used_tokens'] = 0
@@ -109,8 +111,8 @@ def main(exp_name, input_filepath, output_path, prompt_name, temperature):
             except Exception as e:
                 logger.error(f"Error saving response of {row['filename']}_{k}.json: {e}")
         # logger.info(f"Responses.response: {[response.response for response in responses]}")
-        data.at[i, 'responses'] = [response.text for response in responses]
-        data.at[i, 'recaptions'] = [response.response for response in responses]
+        data.at[i, 'recaptions'] = [response.text for response in responses]
+        data.at[i, 'responses'] = [response.response for response in responses]
         data.at[i, 'total_used_tokens'] = sum([response.tokens for response in responses])
 
     # data.to_json(os.path.join(output_path, f"memento_{split}_data_{exp_name}.json"))
