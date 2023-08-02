@@ -45,6 +45,8 @@ class TextMetricsTest(unittest.TestCase):
 
     def test_oov_words(self):
         oov_words_metric = oov_words.OOVWords(self.model, self.tokenizer, self.device)
+        self.assertTrue(oov_words_metric.is_oov("fagagdf"))
+        self.assertFalse(oov_words_metric.is_oov("This"))
         self.assertEqual(oov_words_metric.get_metric(self.texts1), [0, 0])
         self.assertEqual(oov_words_metric.get_metric(self.texts2), [0, 0, 0])
         self.assertEqual(oov_words_metric.get_metric(self.text3), [1, 0, 3])

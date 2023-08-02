@@ -11,6 +11,12 @@ class OOVWords(BaseTextMetric):
     def __init__(self, model, tokenizer, device):
         super().__init__(model, tokenizer, device)
 
+    def is_oov(self, word):
+        """
+        Check if a word is Out Of Vocabulary.
+        """
+        return len(self.tokenizer.tokenize(word)) > 1
+
     def get_metric(self, texts1, texts2=None, labels=None, **kwargs):
         """
         Calculate the number of Out Of Vocabulary Words for a given text set and a tokenizer.
@@ -28,5 +34,5 @@ class OOVWords(BaseTextMetric):
             iterator = tqdm_notebook(texts1, desc="OOV words")
         for text in iterator:
             # Compute OOV words by checking if each word is present in the tokenizer vocabulary
-            oov.append(sum([len(self.tokenizer.tokenize(word))>1 for word in text.split()]))
+            oov.append(sum([self.is_oov(word) for word in text.split()]))
         return oov

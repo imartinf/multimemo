@@ -1,3 +1,4 @@
+import re
 import numpy as np
 
 def extract_sentence_embeddings(data, column, out, tokenizer, model):
@@ -66,3 +67,14 @@ def apply_similarity_filter(data, tokenizer, model, column1, column2, sim, out, 
     data = compute_cosine_similarity(data, column1, column2, sim)
     data = filter_embeddings(data, column1, column2, sim, out, strategy, threshold)
     return data
+
+def normalize_text(s, sep_token = " \n "):
+    s = re.sub(r'\s+',  ' ', s).strip()
+    s = re.sub(r". ,","",s)
+    # remove all instances of multiple spaces
+    s = s.replace("..",".")
+    s = s.replace(". .",".")
+    s = s.replace("\n", "")
+    s = s.strip()
+    
+    return s
