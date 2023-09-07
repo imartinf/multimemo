@@ -1,72 +1,15 @@
+from collections import Counter
+import os
 import re
+import string
 import numpy as np
+import pandas as pd
+from tqdm import tqdm, trange
 
-def extract_sentence_embeddings(data, column, out, tokenizer, model):
-    '''
-    Extracts sentence embeddings from a given model. should return a dataframe with a new column storing the embeddings
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+from tiktoken import Encoding
 
-    data: pandas dataframe with a text column defined by the argument column
-    column: string with the name of the column containing the text
-    out: string with the name of the column to store the embeddings
-    tokenizer: tokenizer to use
-    model: model to use. It should be a sentence transformer model
-    '''
-
-    data = data.copy()
-    data[out] = data[column].apply(lambda x: model.encode(x, tokenizer))
-    return data
-
-def compute_cosine_similarity(data, column1, column2, out):
-    '''
-    Computes the cosine similarity between two vectors. Should return a dataframe with a new column storing the cosine similarity
-    
-    data: pandas dataframe with two columns containing the vectors
-    column1: string with the name of the first column containing the vectors
-    column2: string with the name of the second column containing the vectors
-    out: string with the name of the column to store the cosine similarity
-    '''
-
-    data = data.copy()
-    data[out] = data.apply(lambda x: np.dot(x[column1], x[column2])/(np.linalg.norm(x[column1])*np.linalg.norm(x[column2])), axis=1)
-    return data
-
-def filter_embeddings(data, column1, column2, sim, out, strategy, threshold=0):
-    '''
-    Given a dataset with two text columns and corresponding sentence embeddings, copies the text in the text in the first column
-    to the text in the second column if the similarity between the embeddings is below a threshold. Should return a dataframe
-    with a new column storing the filtered text.
-
-    data: pandas dataframe with two columns containing the text and two columns containing the embeddings
-    column1: string with the name of the first column containing the text
-    column2: string with the name of the second column containing the text
-    sim: string with the name of the column containing the similarity between the embeddings
-    out: string with the name of the column to store the filtered text
-    strategy: string with the strategy to use. It can be 'threshold' or 'iqr'
-    threshold: float with the threshold to use. Only used if strategy is 'threshold' 
-    '''
-
-    data = data.copy()
-    if strategy == 'threshold':
-        data[out] = data.apply(lambda x: x[column1] if x[sim] < threshold else x[column2], axis=1)
-    elif strategy == 'iqr':
-        q1 = data[sim].quantile(0.25)
-        q3 = data[sim].quantile(0.75)
-        iqr = q3 - q1
-        data[out] = data.apply(lambda x: x[column1] if x[sim] < q1 - 1.5*iqr else x[column2], axis=1)
-    else:
-        raise ValueError("Invalid strategy")
-    return data
-
-def apply_similarity_filter(data, tokenizer, model, column1, column2, sim, out, strategy, threshold=0):
-    '''
-    Applies the similarity filter pipeline to a dataset. Should return a dataframe with a new column storing the filtered text
-    '''
-
-    data = data.copy()
-    data = extract_sentence_embeddings(data, column1, 'embeddings1', tokenizer, model)
-    data = compute_cosine_similarity(data, column1, column2, sim)
-    data = filter_embeddings(data, column1, column2, sim, out, strategy, threshold)
-    return data
+from src.visualization.visualize import plot_histogram
 
 def normalize_text(s, sep_token = " \n "):
     s = re.sub(r'\s+',  ' ', s).strip()
@@ -78,3 +21,67 @@ def normalize_text(s, sep_token = " \n "):
     s = s.strip()
     
     return s
+
+def remove_punctuation(text):
+    """
+    Remove punctuation from a text.
+    """
+    return text.translate(str.maketrans('', '', string.punctuation))
+
+def extract_oov_words(data, oov_metric, in_columns, out_columns, save_paths=None):
+    for (in_col, out_col) in zip(in_columns, out_columns):
+        data[out_col] = oov_metric.get_metric(data[in_col].values, notebook=False)
+        data[out_col + '_ratio'] = data[out_col] / data[in_col].str.split().str.len()
+        print(f"Successfully computed OOV for {len(data)} {in_col}.")
+        print(f"Sample {in_col} OOV: {data[out_col].values[:5]}")
+        print(f"Sample {in_col} OOV ratio: {data[out_col + '_ratio'].values[:5]}")
+        print(f"Average {in_col} OOV ratio: {np.mean(data[out_col + '_ratio'].values)}")
+
+    base, ext = os.path.splitext(save_paths)
+    save_paths_ratio = (base + '_ratio' + ext)
+    plot_histogram(data, out_columns, title="OOV words", xlabel="Number of OOV words", ylabel="Number of texts", bins=10, figsize=(9, 5), show=False, save_path=save_paths)
+    plot_histogram(data, [out + '_ratio' for out in out_columns], title="OOV words ratio", xlabel="OOV words ratio", ylabel="Number of texts", bins=20, figsize=(9, 5), show=False, save_path=save_paths_ratio)
+    return data
+
+def most_frequent_oov_words(data, col, oov_metric, nb_words=20):
+    tokenizer = oov_metric.tokenizer
+    oov_words = Counter()
+    for _,row in tqdm(data.iterrows(), total=len(data)):
+        for word in row[col].split():
+            if oov_metric.is_oov(word):
+                oov_words[word] += 1
+
+    print(f"Number of OOV words in {col}: ", len(oov_words))
+
+    oov_words = oov_words.most_common(nb_words)
+    oov_tokens = {}
+    for oov_word, _ in oov_words:
+        if isinstance(tokenizer, PreTrainedTokenizer) or isinstance(tokenizer, PreTrainedTokenizerFast):
+            tokens = tokenizer.tokenize(oov_word)
+        elif isinstance(tokenizer, Encoding):
+            tokens = [tokenizer.decode_single_token_bytes(token) for token in tokenizer.encode(oov_word)]
+        if len(tokens) > 1:
+            tokens = [token for token in tokens if token not in ['[UNK]', '[PAD]']]
+        if len(tokens) > 0:
+            oov_tokens[oov_word] = tokens
+    print("20 Most frequent OOV words split into tokens: ")
+    # Print most frequent
+    print(oov_tokens)
+    return oov_tokens
+
+def print_metric_examples(data, sort_col, data_cols, metric, nb_examples=10):
+    for _,row in data.sort_values(by=sort_col, ascending=False).head(nb_examples).iterrows():
+        print(f"{data_cols[0]}: {row[data_cols[0]]}")
+        print(f"{data_cols[1]}: {row[data_cols[1]]}")
+        print(f"Cosine similarity: {metric.get_metric([row[data_cols[0]]], [row[data_cols[1]]])[0][0]}")
+        print()
+
+def compute_cossim_wrt_oov(data, oov_col='recaption_oov_words', cos_sim_col='cosine_sim_mpnet'):
+    result_df = pd.DataFrame(columns=['oov', 'mean', 'std'])
+    for oov in trange(0, data[oov_col].max() + 1):
+        result_df = pd.concat([result_df, pd.DataFrame({
+            'oov': oov,
+            'mean': data[data[oov_col] == oov][cos_sim_col].mean(),
+            'std': data[data[oov_col] == oov][cos_sim_col].std()
+        }, index=[0])], ignore_index=True)
+    return result_df

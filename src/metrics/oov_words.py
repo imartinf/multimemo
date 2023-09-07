@@ -1,6 +1,9 @@
+from tiktoken import Encoding
 from src.metrics.base_text_metric import BaseTextMetric
 from tqdm import tqdm
 from tqdm.notebook import tqdm as tqdm_notebook
+
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 
 class OOVWords(BaseTextMetric):
@@ -15,7 +18,13 @@ class OOVWords(BaseTextMetric):
         """
         Check if a word is Out Of Vocabulary.
         """
-        return len(self.tokenizer.tokenize(word)) > 1
+        if isinstance(self.tokenizer, PreTrainedTokenizer) or isinstance(self.tokenizer, PreTrainedTokenizerFast):
+            return len(self.tokenizer.tokenize(word)) > 1
+        elif isinstance(self.tokenizer, Encoding):
+            token_ints = self.tokenizer.encode(word)
+            return len(token_ints) > 1
+        else:
+            raise NotImplementedError
 
     def get_metric(self, texts1, texts2=None, labels=None, **kwargs):
         """

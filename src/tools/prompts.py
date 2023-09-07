@@ -108,5 +108,9 @@ PROMPTS = {
         - Caption: {caption}
         - Actions: {actions}
         - Explanation: 
-"""}]
+"""}],
+    'simple_data_aug': [
+        {"role": "system", "content": "You are a helpful assistant, rephrasing text and making sentences more fluent"},
+        {"role": "user", "content": "Please rephrase the following sentence. Give me 3 rephrased answers: {caption}"},
+    ]
 }

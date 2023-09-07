@@ -31,9 +31,16 @@ data: requirements
 
 ## Make Responses Dataset
 responses: requirements
-	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py $(EXP_NAME) data/raw/memento_train_data.json data/processed $(PROMPT_NAME) -temperature 1.5
-	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py $(EXP_NAME) data/raw/memento_val_data.json data/processed $(PROMPT_NAME) -temperature 1.5
+##	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py $(EXP_NAME) data/raw/memento_train_data.json data/processed $(PROMPT_NAME) -temperature 1.5
+##	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py $(EXP_NAME) data/raw/memento_val_data.json data/processed $(PROMPT_NAME) -temperature 1.5
 ##	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py $(EXP_NAME) data/raw/memento_test_data.json data/processed $(PROMPT_NAME) -temperature 1
+	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py recaptions-1t data/raw/memento_train_data.json data/processed recaption -temperature 1
+	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py recaptions-1t data/raw/memento_val_data.json data/processed recaptions-lowt -temperature 1
+	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py recaptions-1t data/raw/memento_test_data.json data/processed recaptions-lowt -temperature 1
+
+	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py simple-data-aug data/raw/memento_train_data.json data/processed simple_data_aug -temperature 1
+	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py simple-data-aug data/raw/memento_val_data.json data/processed simple_data_aug -temperature 1
+	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py simple-data-aug data/raw/memento_test_data.json data/processed simple_data_aug -temperature 1
 
 responses-debug: requirements
 	$(PYTHON_INTERPRETER) src/data/make_responses_dataset.py $(EXP_NAME) data/raw/memento_train_data.json data/processed $(PROMPT_NAME) -temperature 1.5 -debug True

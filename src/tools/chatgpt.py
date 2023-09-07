@@ -24,7 +24,8 @@ class ChatGPT:
 
         self.config = config
         self.model_name = config['MODEL']
-        self.temperature = config['TEMPERATURE']
+        self.temperature = config['TEMPERATURE'] if 'TEMPERATURE' in config else 1
+        self.engine = config['ENGINE'] if 'ENGINE' in config else None
         self.max_tokens = 200
         self.top_p = 1
         self.frequency_penalty = 0
@@ -64,6 +65,31 @@ class ChatGPT:
             # stop=self.stop
         )
         return Response(response)
+    
+    def get_embedding(self, text: str):
+        """
+        Get the embedding of a text from the OpenAI API.
+
+        :param text: The text to get the embedding of.
+        :type text: str
+
+        :return: The embedding of the text.
+        """
+        try:
+            embedding = openai.Embedding.create(
+                engine=self.engine,
+                input=text
+            )
+        except Exception as e:
+            self.logger.error("Error in embedding")
+            self.logger.error(e)
+            retry = self._exception_handler(e, text, "")
+            if retry:
+                embedding = self.get_embedding(text)
+            else:
+                embedding = {}
+                embedding['data'] = [{'embedding': None}]
+        return embedding
     
     def get_responses(self, row, base_prompt):
         responses = []

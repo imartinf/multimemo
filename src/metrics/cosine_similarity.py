@@ -10,12 +10,16 @@ class CosineSimilarity(BaseTextMetric):
     def __init__(self, model, tokenizer, device):
         super().__init__(model, tokenizer, device)
 
-    def get_metric(self, texts1, texts2, labels=None):
+    def get_metric(self, texts1, texts2, labels=None, *args, **kwargs):
         """
         Calculate the cosine similarity between two texts.
         """
-        embeddings1 = self.get_embeddings(texts1)
-        embeddings2 = self.get_embeddings(texts2)
+        if self.model == "precomputed" and "paths" in kwargs:
+            embeddings1 = self.get_embeddings(texts1, path=kwargs['paths'][0], *args, **kwargs)
+            embeddings2 = self.get_embeddings(texts2, path=kwargs['paths'][1], *args, **kwargs)
+        else:
+            embeddings1 = self.get_embeddings(texts1, *args, **kwargs)
+            embeddings2 = self.get_embeddings(texts2, *args, **kwargs)
         # Check shape
         if embeddings1.shape != embeddings2.shape:
             raise ValueError(f"Embeddings must have the same shape. Got {embeddings1.shape} and {embeddings2.shape}.")
