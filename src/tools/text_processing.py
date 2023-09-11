@@ -37,6 +37,15 @@ def extract_oov_words(data, oov_metric, in_columns, out_columns, save_paths=None
         print(f"Sample {in_col} OOV ratio: {data[out_col + '_ratio'].values[:5]}")
         print(f"Average {in_col} OOV ratio: {np.mean(data[out_col + '_ratio'].values)}")
 
+def extract_unk_tokens(data, unk_metric, in_columns, out_columns, save_paths=None):
+    for (in_col, out_col) in zip(in_columns, out_columns):
+        data[out_col] = unk_metric.get_metric(data[in_col].values, notebook=False)
+        data[out_col + '_ratio'] = data[out_col] / data[in_col].str.split().str.len()
+        print(f"Successfully computed UNK for {len(data)} {in_col}.")
+        print(f"Sample {in_col} UNK: {data[out_col].values[:5]}")
+        print(f"Sample {in_col} UNK ratio: {data[out_col + '_ratio'].values[:5]}")
+        print(f"Average {in_col} UNK ratio: {np.mean(data[out_col + '_ratio'].values)}")
+
     base, ext = os.path.splitext(save_paths)
     save_paths_ratio = (base + '_ratio' + ext)
     plot_histogram(data, out_columns, title="OOV words", xlabel="Number of OOV words", ylabel="Number of texts", bins=10, figsize=(9, 5), show=False, save_path=save_paths)
@@ -68,6 +77,22 @@ def most_frequent_oov_words(data, col, oov_metric, nb_words=20):
     # Print most frequent
     print(oov_tokens)
     return oov_tokens
+
+def most_frequent_unk_tokens(data, col, unk_metric, nb_words=20):
+    tokenizer = unk_metric.tokenizer
+    unk_tokens = Counter()
+    for _,row in tqdm(data.iterrows(), total=len(data)):
+        for word in row[col].split():
+            if tokenizer.encode(word, add_special_tokens=False).count(tokenizer.unk_token_id) > 0:
+                unk_tokens[word] += 1
+
+    print(f"Number of UNK tokens in {col}: ", len(unk_tokens))
+
+    unk_tokens = unk_tokens.most_common(nb_words)
+    print("20 Most frequent UNK tokens: ")
+    # Print most frequent
+    print(unk_tokens)
+    return unk_tokens
 
 def print_metric_examples(data, sort_col, data_cols, metric, nb_examples=10):
     for _,row in data.sort_values(by=sort_col, ascending=False).head(nb_examples).iterrows():

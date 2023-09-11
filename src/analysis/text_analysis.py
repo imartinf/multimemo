@@ -9,8 +9,9 @@ import openai
 import pandas as pd
 from tqdm import tqdm
 
-from src.tools.text_processing import remove_punctuation, extract_oov_words, most_frequent_oov_words, print_metric_examples, compute_cossim_wrt_oov
+from src.tools.text_processing import extract_unk_tokens, most_frequent_unk_tokens, remove_punctuation, extract_oov_words, most_frequent_oov_words, print_metric_examples, compute_cossim_wrt_oov
 from src.metrics.oov_words import OOVWords
+from src.metrics.unk_tokens import UNKTokens
 from src.metrics.cosine_similarity import CosineSimilarity
 
 from sentence_transformers import SentenceTransformer
@@ -55,7 +56,19 @@ def main(input_filepath, output_path, text_cols):
     tokenizer_openai = tiktoken.get_encoding("cl100k_base")
     device = "cuda"
 
+    unk_metric = UNKTokens(model, tokenizer, device)
+
+    click.echo(f"Computing UNK tokens using: {unk_metric.tokenizer}")
+    out_cols = [f"{text_col}_unk" for text_col in text_cols]
+    save_paths = os.path.join(output_path, "unk.png")
+    data_exp = extract_unk_tokens(data_exp, unk_metric, text_cols, out_cols, save_paths)
+
+    for text_col in text_cols:
+        most_frequent_unk_tokens(data_exp, text_col, unk_metric)
     
+
+
+    """
     oov_metric = OOVWords(model, tokenizer, device)
     oov_metric_openai = OOVWords(model, tokenizer_openai, device)
 
@@ -65,7 +78,7 @@ def main(input_filepath, output_path, text_cols):
     data_exp = extract_oov_words(data_exp, oov_metric, text_cols, out_cols, save_paths)
     data_exp_openai = extract_oov_words(data_exp, oov_metric_openai, text_cols, out_cols, save_paths_openai)
 
-    """
+    
     for text_col in text_cols:
         click.echo(f"Using tokenizer: {oov_metric.tokenizer}")
         most_frequent_oov_words(data_exp, text_col, oov_metric)
@@ -74,8 +87,8 @@ def main(input_filepath, output_path, text_cols):
 
     """
 
-    cos_sim_metric = CosineSimilarity(model, tokenizer, device)
-    cos_sim_metric_openai = CosineSimilarity(model_openai, tokenizer_openai, device)
+    # cos_sim_metric = CosineSimilarity(model, tokenizer, device)
+    # cos_sim_metric_openai = CosineSimilarity(model_openai, tokenizer_openai, device)
 
     # click.echo("Cosine similarity examples:")
     # print_metric_examples(data_exp, 'recaptions_oov', text_cols, cos_sim_metric)
@@ -88,7 +101,7 @@ def main(input_filepath, output_path, text_cols):
     # data_exp['cos_sim'] = data_exp.progress_apply(lambda row: cos_sim_metric.get_metric(
     #    row[text_cols[0]], row[text_cols[1]])[0][0], axis=1)
     
-    
+    """
     click.echo(f"Computing cosine similarity using: {cos_sim_metric_openai.tokenizer}")
     data_exp_openai['cos_sim'] = data_exp_openai.progress_apply(lambda row: cos_sim_metric_openai.get_metric(
         row[text_cols[0]], row[text_cols[1]], paths=[row[f"{text_cols[0]}_emb_path"], row[f"{text_cols[1]}_emb_path"]])[0][0], axis=1)
@@ -104,7 +117,7 @@ def main(input_filepath, output_path, text_cols):
     # Lineplots
     # plot_lineplot(cos_sim_vs_oov_df, x='oov', y='mean', err='std', title="Cosine similarity vs OOV words", xlabel="Number of OOV words", ylabel="Cosine similarity", figsize=(9, 5), show=False, save_path=os.path.join(output_path, "cos_sim_vs_oov.png"))
     plot_lineplot(cos_sim_vs_oov_df_openai, x='oov', y='mean', err='std', title="Cosine similarity vs OOV words (OpenAI)", xlabel="Number of OOV words", ylabel="Cosine similarity", figsize=(9, 5), show=False, save_path=os.path.join(output_path, "cos_sim_vs_oov_openai.png"))
-
+    """
     click.echo("Done!")
 
      

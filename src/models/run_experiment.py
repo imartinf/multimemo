@@ -10,7 +10,7 @@ from src.tools.metrics import calc_pearson, calc_spearman
 
 from src.tools.utils import *
 
-from sklearn.linear_model import BayesianRidge
+from sklearn.linear_model import BayesianRidge, PassiveAggressiveRegressor, SGDRegressor
 
 
 @click.command()
@@ -21,7 +21,9 @@ from sklearn.linear_model import BayesianRidge
 @click.argument('label_col', type=click.STRING)
 @click.argument('folds', type=click.INT)
 @click.option('--group_by', type=click.STRING, default=None)
-def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by):
+@click.option('--sample', type=click.FLOAT, default=None)
+@click.option('--bs', type=click.INT, default=None)
+def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, sample, bs):
     """
     Run an experiment to train, fine-tine or evaluate models
 
@@ -46,6 +48,12 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by):
     :param group_by: The name of the column to group by.
     :type group_by: str
 
+    :param sample: The fraction of the data to use.
+    :type sample: float
+
+    :param bs: The batch size to use.
+    :type bs: int
+
     :return: None
     """
 
@@ -59,6 +67,9 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by):
     logger.info(f'label column is: {label_col}')
     logger.info(f'number of folds is: {folds}')
     logger.info(f'group by column is: {group_by}')
+    logger.info(f'sample fraction is: {sample}')
+    logger.info(f'batch size is: {bs}')
+
 
     if not os.path.exists(out_path):
         os.makedirs(out_path)
@@ -66,8 +77,31 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by):
 
     # Load data
     try:
-        data = load_data(data_path)
-        data = data.sample(frac=0.1).reset_index(drop=True)
+        if 'train' in data_path:
+            # Load both train and val and concat them
+            data1 = load_data(data_path)
+            data2 = load_data(data_path.replace('train', 'val'))
+            data = pd.concat([data1, data2]).reset_index(drop=True)
+        elif 'val' in data_path:
+            # Load both train and val and concat them
+            data1 = load_data(data_path)
+            data2 = load_data(data_path.replace('val', 'train'))
+            data = pd.concat([data1, data2]).reset_index(drop=True)
+        else:
+            data = load_data(data_path)
+        # Explode data if it contains lists
+        if isinstance(data[feat_col].iloc[0], list):
+            data = data.explode(feat_col).reset_index(drop=True)
+            click.echo("Exploded data.")
+        click.echo(f"Loaded {len(data)} rows of data.")
+        # Sample data keeping the label distribution (which is continuous)
+        if sample is not None:
+            # Sort data by label column (continuous)
+            data = data.sort_values(label_col)
+            # Save one out of every sample rows and discard the rest
+            data = data.iloc[::int(1/sample)]
+            logger.info(f"Sampled {sample} of the data.")
+            logger.info(f"New data size: {len(data)}")
     except ValueError as e:
         logger.error(e)
         return
@@ -75,6 +109,10 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by):
     # Load model
     if model_name == "brr":
         model = BayesianRidge()
+    elif model_name == "sgdr":
+        model = SGDRegressor()
+    elif model_name == "par":
+        model = PassiveAggressiveRegressor()
     else:
         logger.error(f"Model {model_name} not found.")
         return
@@ -91,7 +129,7 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by):
 
     metrics = [mean_squared_error, calc_pearson, calc_spearman]
 
-    kf = KFoldsExperiment(Model(model), data_prepared, metrics, k=folds, group_by='groups')
+    kf = KFoldsExperiment(Model(model), data_prepared, metrics, k=folds, group_by='groups', batch_size=bs)
 
     results = kf.run(out_path)
     # Save results
