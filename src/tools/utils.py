@@ -2,7 +2,10 @@ import json
 import os
 
 import click
+import numpy as np
 import pandas as pd
+from numpy.lib.format import open_memmap
+from tqdm import tqdm
 
 
 def save_json(json_data, path2save, json_indent):
@@ -145,3 +148,17 @@ def explode_data(data, columns):
         # Explode dataframe
         data[split] = df.explode(columns, ignore_index=True)
     return data
+
+def build_memarray_from_files(files):
+    """
+    Build a memory array from a list of files.
+    """
+    try:
+        arr = open_memmap(files[0])
+    except Exception as e:
+        click.echo(f"Could not load file {files[0]}")
+        raise e
+    for file in tqdm(files[1:]):
+        arr = np.vstack((arr, open_memmap(file)))
+    return arr
+        

@@ -1,16 +1,25 @@
 # -*- coding: utf-8 -*-
-import click
 import logging
 from pathlib import Path
-from dotenv import find_dotenv, load_dotenv
+
+import click
 import numpy as np
+from dotenv import find_dotenv, load_dotenv
+from sklearn.linear_model import (BayesianRidge, PassiveAggressiveRegressor,
+                                  SGDRegressor)
 from sklearn.metrics import mean_squared_error
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
 from src.tools.kfolds import KFoldsExperiment, Model
 from src.tools.metrics import calc_pearson, calc_spearman
-
 from src.tools.utils import *
 
-from sklearn.linear_model import BayesianRidge, PassiveAggressiveRegressor, SGDRegressor
+MODELS = {
+    'brr': BayesianRidge(),
+    'sgdr': SGDRegressor(),
+    'par': PassiveAggressiveRegressor(),
+    "mpnet": AutoModelForSequenceClassification.from_pretrained("sentence-transformers/all-mpnet-base-v2", num_labels=1)
+}
 
 
 @click.command()
@@ -80,7 +89,7 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, 
         if 'train' in data_path:
             # Load both train and val and concat them
             data1 = load_data(data_path)
-            data2 = load_data(data_path.replace('train', 'val'))
+            data2 = load_data(data_path.replace('train', 'val')) if os.path.exists(data_path.replace('train', 'val')) else pd.DataFrame()
             data = pd.concat([data1, data2]).reset_index(drop=True)
         elif 'val' in data_path:
             # Load both train and val and concat them
@@ -107,15 +116,15 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, 
         return
     
     # Load model
-    if model_name == "brr":
-        model = BayesianRidge()
-    elif model_name == "sgdr":
-        model = SGDRegressor()
-    elif model_name == "par":
-        model = PassiveAggressiveRegressor()
-    else:
+    try:
+        model = MODELS[model_name]
+        logger.info(f"Loaded model: {model_name}")
+    except KeyError as e:
         logger.error(f"Model {model_name} not found.")
         return
+    
+    tok = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2") if model_name == "mpnet" else None
+    logger.info(f"Loaded tokenizer: {tok}")
     
     # Prepare data
     # Check if features column contains paths
@@ -129,7 +138,7 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, 
 
     metrics = [mean_squared_error, calc_pearson, calc_spearman]
 
-    kf = KFoldsExperiment(Model(model), data_prepared, metrics, k=folds, group_by='groups', batch_size=bs)
+    kf = KFoldsExperiment(Model(model,tok,"cuda"), data_prepared, metrics, k=folds, group_by='groups', batch_size=bs)
 
     results = kf.run(out_path)
     # Save results
