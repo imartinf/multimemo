@@ -5,9 +5,11 @@ from pathlib import Path
 import click
 import numpy as np
 from dotenv import find_dotenv, load_dotenv
+from sklearn.decomposition import IncrementalPCA
 from sklearn.linear_model import (BayesianRidge, PassiveAggressiveRegressor,
                                   SGDRegressor)
 from sklearn.metrics import mean_squared_error
+from sklearn.pipeline import Pipeline
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from src.tools.kfolds import KFoldsExperiment, Model
@@ -16,7 +18,8 @@ from src.tools.utils import *
 
 MODELS = {
     'brr': BayesianRidge(),
-    'sgdr': SGDRegressor(),
+    'sgdr': SGDRegressor(verbose=1, tol = 1e-6, n_iter_no_change=10, max_iter=1000),
+    'ipca-sgdr': Pipeline(steps=[('ipca', IncrementalPCA(n_components=512,batch_size=1024)), ('sgdr', SGDRegressor(verbose=0, tol = 1e-6, n_iter_no_change=10, max_iter=1000))]),
     'par': PassiveAggressiveRegressor(),
     "mpnet": AutoModelForSequenceClassification.from_pretrained("sentence-transformers/all-mpnet-base-v2", num_labels=1)
 }
@@ -32,7 +35,8 @@ MODELS = {
 @click.option('--group_by', type=click.STRING, default=None)
 @click.option('--sample', type=click.FLOAT, default=None)
 @click.option('--bs', type=click.INT, default=None)
-def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, sample, bs):
+@click.option('--kf_type', type=click.STRING, default='simple')
+def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, sample, bs, kf_type):
     """
     Run an experiment to train, fine-tine or evaluate models
 
@@ -63,6 +67,9 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, 
     :param bs: The batch size to use.
     :type bs: int
 
+    :param kf_type: The type of cross-validation to use.
+    :type kf_type: str
+
     :return: None
     """
 
@@ -78,6 +85,7 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, 
     logger.info(f'group by column is: {group_by}')
     logger.info(f'sample fraction is: {sample}')
     logger.info(f'batch size is: {bs}')
+    logger.info(f'cross-validation type is: {kf_type}')
 
 
     if not os.path.exists(out_path):
@@ -138,7 +146,7 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, 
 
     metrics = [mean_squared_error, calc_pearson, calc_spearman]
 
-    kf = KFoldsExperiment(Model(model,tok,"cuda"), data_prepared, metrics, k=folds, group_by='groups', batch_size=bs)
+    kf = KFoldsExperiment(Model(model,tok,"cuda"), data_prepared, metrics, k=folds, group_by='groups', batch_size=bs, type=kf_type)
 
     results = kf.run(out_path)
     # Save results

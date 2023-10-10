@@ -161,4 +161,9 @@ def build_memarray_from_files(files):
     for file in tqdm(files[1:]):
         arr = np.vstack((arr, open_memmap(file)))
     return arr
-        
+
+def z_score(x, mean, std):
+    """
+    Z-score a value.
+    """
+    return (x - mean) / std
