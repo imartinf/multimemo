@@ -95,3 +95,6 @@ target/
 .mypy_cache/
 
 src/tools/Brysbaert_et_al_concreteness_vocabulary.txt
+
+vivit-*
+wandb

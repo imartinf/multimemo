@@ -10,7 +10,11 @@ from sklearn.linear_model import (BayesianRidge, PassiveAggressiveRegressor,
                                   SGDRegressor)
 from sklearn.metrics import mean_squared_error
 from sklearn.pipeline import Pipeline
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    VivitForVideoClassification,
+    VivitImageProcessor)
 
 from src.tools.kfolds import KFoldsExperiment, Model
 from src.tools.metrics import calc_pearson, calc_spearman
@@ -21,7 +25,8 @@ MODELS = {
     'sgdr': SGDRegressor(verbose=1, tol = 1e-6, n_iter_no_change=10, max_iter=1000),
     'ipca-sgdr': Pipeline(steps=[('ipca', IncrementalPCA(n_components=512,batch_size=1024)), ('sgdr', SGDRegressor(verbose=0, tol = 1e-6, n_iter_no_change=10, max_iter=1000))]),
     'par': PassiveAggressiveRegressor(),
-    "mpnet": AutoModelForSequenceClassification.from_pretrained("sentence-transformers/all-mpnet-base-v2", num_labels=1)
+    "mpnet": AutoModelForSequenceClassification.from_pretrained("sentence-transformers/all-mpnet-base-v2", num_labels=1),
+    "vivit": VivitForVideoClassification.from_pretrained("google/vivit-b-16x2-kinetics400"),
 }
 
 
@@ -131,8 +136,11 @@ def main(data_path, model_name, out_path, feat_col, label_col, folds, group_by, 
         logger.error(f"Model {model_name} not found.")
         return
     
-    tok = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2") if model_name == "mpnet" else None
-    logger.info(f"Loaded tokenizer: {tok}")
+    if model_name == 'mpnet':
+        tok = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
+    elif model_name == 'vivit':
+        processor = VivitImageProcessor.from_pretrained("google/vivit-b-16x2-kinetics400")
+    logger.info(f"Loaded processor: {tok if tok is not None else processor}")
     
     # Prepare data
     # Check if features column contains paths
