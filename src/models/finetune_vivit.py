@@ -224,6 +224,12 @@ def model_init(trial):
     config.num_labels = 1
     config.num_frames = 8
     config.video_size = [8, 224, 224]
+    if trial is not None:
+        for k, v in trial.items():
+        # Check if keys are in config
+            if k in config.to_dict():
+                config[k] = v
+    # Replace config values for trial values
     model = VivitForVideoClassification(config)
     return model
 
@@ -247,14 +253,15 @@ def wandb_hp_space(trial):
             "goal": "maximize"
         },
         "parameters": {
-            "num_train_epochs": {"min": 1, "max": 30},
+            # Epochs are ints
+            "num_train_epochs": {"values": np.arange(1, 31, 1).tolist()},
             "per_device_train_batch_size": {"values": [1, 2, 4, 8]},
             # Set evaluation batch size equal to training batch size
             # "per_device_eval_batch_size": {"ref": "per_device_train_batch_size"},
-            "gradient_accumulation_steps": {"values": [1, 2, 4, 8]},
-            "warmup_ratio": {"min": 0.0, "max": 0.1},
+            "gradient_accumulation_steps": {"values": [1, 2, 4]},
+            "warmup_ratio": {"values": [0.0, 0.1, 0.2, 0.3, 0.4]},
             "learning_rate": {"values": [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1]},
-            "weight_decay": {"min": 0.0, "max": 0.1},
+            "weight_decay": {"values": [0.0, 0.01, 0.001, 0.0001]},
         },
         "name": f"bayesian-hyperparameter-search-{trial_name}",
     }
@@ -396,7 +403,6 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             logging_dir=os.path.join(BASE_DIR, "logs", new_model_name),
             load_best_model_at_end=True,
             #metric_for_best_model="spearmanr",
-            max_steps=(len(train_dataset) // batch_size) * num_epochs,
             # report_to="wandb",
             run_name=new_model_name,
         )
@@ -423,7 +429,8 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
                 n_trials=10,
                 # compute_objective=compute_spearman,
                 # hp_name=new_model_name,
-                project="training-video-transformers-v2"
+                project="training-video-transformers-v3",
+                metric="objective"
             )
             # Save results
             logging.info(best_trial)
