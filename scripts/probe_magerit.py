@@ -20,9 +20,13 @@ def main():
         print("Available RAM: ", torch.cuda.get_device_properties(0).total_memory/1024**3, "GB")
     except RuntimeError:
         print("CUDA not available.")
-        print
 
-    print("Available CPU cores: ", torch.get_num_threads())
+    # CPU INFO. DO NOT USE TORCH FOR THIS
+    print("Available CPU RAM: ", os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024.**3))
+    print("CPU name: ", os.uname().nodename)
+    print("CPU model: ", os.uname().machine)
+    print("CPU architecture: ", os.uname().sysname)
+    print("Number of CPU cores: ", os.cpu_count())
     print("pyTorch version: ", torch.__version__)
     # Dont use torch for python version
     print("Python version: ", sys.version)

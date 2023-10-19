@@ -98,3 +98,7 @@ src/tools/Brysbaert_et_al_concreteness_vocabulary.txt
 
 vivit-*
 wandb
+.venv*
+
+# magerit out files
+*.out
