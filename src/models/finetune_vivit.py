@@ -239,44 +239,46 @@ def model_init_finetune(trial):
     model = VivitForVideoClassification.from_pretrained(
         "google/vivit-b-16x2-kinetics400", num_labels=1, ignore_mismatched_sizes=True)
     # Freeze all layers except the last one
-    for param in model.parameters():
-        param.requires_grad = False
-    for param in model.classifier.parameters():
-        param.requires_grad = True
+    # for param in model.parameters():
+    #     param.requires_grad = False
+    # for param in model.classifier.parameters():
+    #     param.requires_grad = True
     return model
 
 def wandb_hp_space(trial):
     # Get a unique trial name across all trials
     trial_name = wandb.util.generate_id()
     return {
-        "method": "bayes",
+        "method": "grid",
         "metric": {
             "name": "eval/spearmanr",
             "goal": "maximize"
         },
         "parameters": {
             # Epochs are ints
-            "num_train_epochs": {"distribution": "int_uniform", "min": 4, "max": 50},
-            "per_device_train_batch_size": {"distribution": "q_log_uniform_values", "min": 4, "max": 32},
+            # "num_train_epochs": {"distribution": "int_uniform", "min": 4, "max": 50},
+            "num_train_epochs": {"value": 4},
+            # "per_device_train_batch_size": {"distribution": "q_log_uniform_values", "min": 4, "max": 32},
+            "per_device_train_batch_size": {"value": 1},
             "warmup_ratio": {'value': 0},
             # Set evaluation batch size equal to training batch size
             # "per_device_eval_batch_size": {"ref": "per_device_train_batch_size"},
             # "gradient_accumulation_steps": {"values": [1, 2, 4]},
             # "warmup_ratio": {"values": [0.0, 0.1, 0.2, 0.3, 0.4]},
-            # "learning_rate": {"values": [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1]},
+            "learning_rate": {"values": [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1]},
             # "weight_decay": {"values": [0.0, 0.01, 0.001, 0.0001]},
         },
-        "name": f"bayesian-hyperparameter-search-{trial_name}-magerit",
+        "name": f"bayesian-hyperparameter-search-{trial_name}-magerit-ALL-WEIGHTS",
     }
 
 def check_cpu_usage(logger):
     # Get current CPU usage
     cpu_usage = psutil.cpu_percent()
-    logger.info(f"Current CPU usage: {cpu_usage}%")
+    # logger.info(f"Current CPU usage: {cpu_usage}%")
     # If CPU usage is greater than 90%, sleep for 10 seconds
     while cpu_usage > 90:
-        logger.info("CPU usage is greater than 90%. Sleeping for 10 seconds.")
-        time.sleep(10)
+        logger.info("CPU usage is greater than 90%. Sleeping for 3 seconds.")
+        time.sleep(3)
         cpu_usage = psutil.cpu_percent()
         logger.info(f"Current CPU usage: {cpu_usage}%")
 
@@ -289,10 +291,11 @@ def check_cpu_usage(logger):
 @click.option('--method', type=click.STRING, default='pytorch')
 @click.option('--param_search', type=click.BOOL, default=False)
 @click.option('--finetune', type=click.BOOL, default=False)
+@click.option('--learning_rate', type=click.FLOAT, default=5e-5)
 @click.option('--batch_size', type=click.INT, default=4)
 @click.option('--num_epochs', type=click.INT, default=1)
 @click.option('--sample', type=click.FLOAT, default=1)
-def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune, batch_size, num_epochs, sample):
+def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune, learning_rate, batch_size, num_epochs, sample):
     # Setup logging using click
     log_file = os.path.join(log_dir, f"logger-{exp_name}.log")
     logging.basicConfig(filename=log_file, level=logging.INFO)
@@ -305,6 +308,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     logger.info(f'method is: {method}')
     logger.info(f'finetune is: {finetune}')
     logger.info(f'batch size is: {batch_size}')
+    logger.info(f'learning rate is: {learning_rate}')
     logger.info(f'num epochs is: {num_epochs}')
     logger.info(f'sample is: {sample}')
     logger.info(f'param search is: {param_search}')
@@ -329,10 +333,10 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
         video_dir = base_dir
     # av.logging.set_level(av.logging.ERROR)
 
-    check_cpu_usage(logger)
+    # check_cpu_usage(logger)
     model_ckpt = "google/vivit-b-16x2-kinetics400"
     image_processor = VivitImageProcessor.from_pretrained(model_ckpt)
-    check_cpu_usage(logger)
+    # check_cpu_usage(logger)
     if torch.cuda.is_available():
         logger.info(f"Current GPU memory usage: {torch.cuda.memory_allocated(torch.device('cuda'))/1024**3} GB")
     #model_ft = VivitForVideoClassification.from_pretrained(
@@ -346,7 +350,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     else:
         model_ft = VivitForVideoClassification.from_pretrained(
             model_ckpt, num_labels=1, ignore_mismatched_sizes=True)
-        check_cpu_usage(logger)
+        # check_cpu_usage(logger)
         if torch.cuda.is_available():
             logger.info(f"Current GPU memory usage: {torch.cuda.memory_allocated(torch.device('cuda'))/1024**3} GB")
     
@@ -364,7 +368,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     video_path = os.path.join(video_dir, "all_videos/")
     train_data = pd.read_json(os.path.join(video_dir, "memento_train_data.json")).sample(frac=sample)
     test_data = pd.read_json(os.path.join(video_dir, "memento_val_data.json")).sample(frac=sample)
-    check_cpu_usage(logger)
+    # check_cpu_usage(logger)
 
     train_data['filename'] = train_data['filename'].apply(lambda x: video_path + x)
     test_data['filename'] = test_data['filename'].apply(lambda x: video_path + x)
@@ -373,7 +377,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     # This is done to avoid errors with some videos
     num_of_resampled_videos = 0
     for filename in pd.concat([train_data, test_data], ignore_index=True).filename.values:
-        check_cpu_usage(logger)
+        # check_cpu_usage(logger)
         if filename.endswith("_resampled.mp4"):
             original_filename = filename.replace("_resampled.mp4", ".mp4")
             if os.path.exists(original_filename):
@@ -383,14 +387,14 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
                 test_data['filename'] = test_data['filename'].replace(filename, original_filename)
     logging.info(f"Replaced {num_of_resampled_videos} videos with their resampled versions.")
 
-    check_cpu_usage(logger)
+    # check_cpu_usage(logger)
 
     
 
     train_dataset = VideoDataset(train_data, 'filename', 'mem_score', num_frames_to_sample, sample_rate, video=True, processor=image_processor)
     test_dataset = VideoDataset(test_data, 'filename', 'mem_score', num_frames_to_sample, num_frames_to_sample, video=True, processor=image_processor)
 
-    check_cpu_usage(logger)
+    # check_cpu_usage(logger)
 
     model_name = model_ckpt.split("/")[-1]
     new_model_name = f"{model_name}-memento-{exp_name}"
@@ -400,14 +404,14 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
         logger.info("Training using native pytorch")
         metric = evaluate.load("spearmanr")
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        check_cpu_usage(logger)
+        # check_cpu_usage(logger)
         # Log GPU usage
         if torch.cuda.is_available():
             logger.info(f"Current GPU memory usage: {torch.cuda.memory_allocated(device)/1024**3} GB")
         model_ft.to(device)
         if torch.cuda.is_available():
             logger.info(f"Current GPU memory usage: {torch.cuda.memory_allocated(device)/1024**3} GB")
-        check_cpu_usage(logger)
+        # check_cpu_usage(logger)
 
         optimizer = torch.optim.AdamW(model_ft.parameters(), lr=5e-5)
         criterion = nn.MSELoss()
@@ -443,24 +447,45 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     
     elif method == 'transformers':
         # Train using transformers Trainer
-        args = TrainingArguments(
-            new_model_name,
-            remove_unused_columns=True,
-            evaluation_strategy="epoch",
-            save_strategy="epoch",
-            #learning_rate=5e-5,
-            #per_device_train_batch_size=batch_size,
-            #per_device_eval_batch_size=batch_size,
-            #gradient_accumulation_steps=16,
-            #tf32=True,
-            #warmup_ratio=0.1,
-            logging_steps=10,
-            logging_dir=os.path.join(BASE_DIR, "logs", new_model_name),
-            load_best_model_at_end=True,
-            #metric_for_best_model="spearmanr",
-            # report_to="wandb",
-            run_name=new_model_name,
-        )
+        if param_search:
+            args = TrainingArguments(
+                new_model_name,
+                remove_unused_columns=True,
+                evaluation_strategy="epoch",
+                save_strategy="epoch",
+                #learning_rate=5e-5,
+                #per_device_train_batch_size=batch_size,
+                #per_device_eval_batch_size=batch_size,
+                #gradient_accumulation_steps=16,
+                #tf32=True,
+                #warmup_ratio=0.1,
+                logging_steps=10,
+                logging_dir=os.path.join(BASE_DIR, "logs", new_model_name),
+                load_best_model_at_end=True,
+                #metric_for_best_model="spearmanr",
+                #report_to="wandb",
+                run_name=new_model_name,
+            )
+        else:
+            args = TrainingArguments(
+                new_model_name,
+                remove_unused_columns=True,
+                evaluation_strategy="epoch",
+                save_strategy="epoch",
+                learning_rate=learning_rate,
+                per_device_train_batch_size=batch_size,
+                per_device_eval_batch_size=batch_size,
+                gradient_accumulation_steps=4,
+                #tf32=True,
+                #warmup_ratio=0.1,
+                logging_steps=10,
+                logging_dir=os.path.join(BASE_DIR, "logs", new_model_name),
+                load_best_model_at_end=True,
+                metric_for_best_model="eval/spearmanr",
+                report_to="wandb",
+                run_name=new_model_name,
+            )
+
 
         trainer = Trainer(
             None,
@@ -481,7 +506,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
                 direction="maximize",
                 backend="wandb",
                 hp_space=wandb_hp_space,
-                n_trials=30,
+                # n_trials=30,
                 # compute_objective=compute_spearman,
                 # hp_name=new_model_name,
                 project="training-video-transformers-v3",
