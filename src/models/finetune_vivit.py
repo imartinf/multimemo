@@ -298,17 +298,18 @@ def wandb_hp_space(trial):
         "parameters": {
             # Epochs are ints
             "num_train_epochs": {"value": 10},
-            # "per_device_train_batch_size": {"value": 4},
+            "per_device_train_batch_size": {"value": 4},
             "warmup_ratio": {'value': 0.4},
             # Set evaluation batch size equal to training batch size
             # "per_device_eval_batch_size": {"ref": "per_device_train_batch_size"},
-            "gradient_accumulation_steps": {"values": [4, 8, 16]},
+            "gradient_accumulation_steps": {"value": 4},
             # "warmup_ratio": {"values": [0.0, 0.1, 0.2, 0.3, 0.4]},
             "learning_rate": {"value": 1e-04},
             "weight_decay": {"value": 0.0001},
-            # "num_frames": {"values": [2, 4, 8, 16, 32]},
+            "num_frames": {"values": [4, 8, 16, 32]},
+            "tubelet_size" : {"value": [4, 16, 16]}
         },
-        "name": f"validation-gradient-accumulation-steps-{trial_name}-gth11",
+        "name": f"validation-gradient-accumulation-steps-4frames-{trial_name}-gth11",
     }
 
 def check_cpu_usage(logger):
@@ -417,14 +418,11 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     # This is done to avoid errors with some videos
     num_of_resampled_videos = 0
     for filename in pd.concat([train_data, test_data], ignore_index=True).filename.values:
-        # check_cpu_usage(logger)
-        if filename.endswith("_resampled.mp4"):
-            original_filename = filename.replace("_resampled.mp4", ".mp4")
-            if os.path.exists(original_filename):
-                num_of_resampled_videos += 1
-                logging.info(f"Replacing {filename} with {original_filename}")
-                train_data['filename'] = train_data['filename'].replace(filename, original_filename)
-                test_data['filename'] = test_data['filename'].replace(filename, original_filename)
+        # check_cpu_usage(logging)
+        if not filename.endswith("_resampled.mp4") and os.path.exists(os.path.splitext(filename)[0] + "_resampled.mp4"):
+            logging.info(f"Found resampled version of {filename}. Replacing it.")
+            filename = os.path.splitext(filename)[0] + "_resampled.mp4"
+            num_of_resampled_videos += 1
     logging.info(f"Replaced {num_of_resampled_videos} videos with their resampled versions.")
 
     # check_cpu_usage(logger)
@@ -491,7 +489,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             evaluation_strategy="epoch",
             save_strategy="epoch",
             learning_rate=learning_rate,
-            auto_find_batch_size=True,
+            auto_find_batch_size=False,
             # per_device_train_batch_size=batch_size,
             # per_device_eval_batch_size=batch_size,
             #gradient_accumulation_steps=16,
