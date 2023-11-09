@@ -176,7 +176,7 @@ class Model:
             # Extract metric name from function name
             metric_name = metric.__name__
             results[metric_name] = metric(data['y'].to_numpy(), y_hat)
-        return results
+        return results, y_hat
 
     def save(self, path):
         """
