@@ -246,6 +246,7 @@ def collate_fn(examples):
     labels = torch.tensor([example[1] for example in examples])
     return {"pixel_values": pixel_values, "labels": labels}
 
+
 def compute_spearman(eval_pred):
     metric = evaluate.load("spearmanr")
     try:
@@ -257,6 +258,7 @@ def compute_spearman(eval_pred):
             logging.error("Error getting logits and labels")
             exit()
     return metric.compute(predictions=logits, references=labels)
+
 
 def model_init(trial):
     config = VivitConfig.from_pretrained("google/vivit-b-16x2-kinetics400")
@@ -276,6 +278,7 @@ def model_init(trial):
     model = VivitForVideoClassification(config)
     return model
 
+
 def model_init_finetune(trial):
     model = VivitForVideoClassification.from_pretrained(
         "google/vivit-b-16x2-kinetics400", num_labels=1, ignore_mismatched_sizes=True)
@@ -285,6 +288,7 @@ def model_init_finetune(trial):
     # for param in model.classifier.parameters():
     #     param.requires_grad = True
     return model
+
 
 def wandb_hp_space(trial):
     # Get a unique trial name across all trials

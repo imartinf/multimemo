@@ -15,12 +15,14 @@ def save_json(json_data, path2save, json_indent):
     with open(path2save, "w") as write_file:
         write_file.write(messages_JSON)
 
+
 def create_dir(dir_path):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
         click.echo(f"Directory {dir_path} created.")
     else:
         click.echo(f"Directory {dir_path} already exists.")
+
 
 def load_data(path):
     """
@@ -50,6 +52,7 @@ def load_data(path):
 
     return data
 
+
 def load_file(path):
     """
     Loads a file from path.
@@ -63,16 +66,17 @@ def load_file(path):
     :rtype: DataFrame
     """
     # Load data
-    if path.endswith('.csv'):
+    if path.endswith(".csv"):
         data = pd.read_csv(path)
-    elif path.endswith('.json'):
-        data = pd.read_json(path, orient='records')
-    elif path.endswith('.pkl'):
+    elif path.endswith(".json"):
+        data = pd.read_json(path, orient="records")
+    elif path.endswith(".pkl"):
         data = pd.read_pickle(path)
     else:
         raise ValueError(f"File extension not supported: {path}")
 
     return data
+
 
 def load_dir(path):
     """
@@ -93,7 +97,7 @@ def load_dir(path):
         # Get all files in directory
         files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
         # Get splits
-        splits = set([f.split('_')[1] for f in files])
+        splits = set([f.split("_")[1] for f in files])
         # Load files
         data = {}
         for split in splits:
@@ -102,6 +106,7 @@ def load_dir(path):
             # Load file
             data[split] = load_file(os.path.join(path, split_path[0]))
     return data
+
 
 def load_config(path):
     """
@@ -117,13 +122,14 @@ def load_config(path):
     """
 
     # Load config
-    if path.endswith('.json'):
+    if path.endswith(".json"):
         with open(path) as f:
             config = json.load(f)
     else:
         raise ValueError(f"Config file extension not supported: {path}")
 
     return config
+
 
 def explode_data(data, columns):
     """
@@ -149,6 +155,7 @@ def explode_data(data, columns):
         data[split] = df.explode(columns, ignore_index=True)
     return data
 
+
 def build_memarray_from_files(files):
     """
     Build a memory array from a list of files.
@@ -162,8 +169,24 @@ def build_memarray_from_files(files):
         arr = np.vstack((arr, open_memmap(file)))
     return arr
 
+
 def z_score(x, mean, std):
     """
     Z-score a value.
     """
     return (x - mean) / std
+
+
+def subsample_3frames(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Get the first, middle and last frames from each video by filtering the original dataset
+    TODO: (imartinf) generalize to n fps.
+    """
+    # Group by filename and order each group by framepath
+    data = (
+        data.groupby(["filename"])
+        .apply(lambda x: x.sort_values(["frame_path"], ascending=True))
+        .reset_index(drop=True)
+    )
+
+    return data.groupby(["filename"]).apply(lambda x: x.iloc[[0, int(len(x) / 2), -1]]).reset_index(drop=True)
