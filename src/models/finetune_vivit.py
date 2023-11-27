@@ -44,8 +44,10 @@ class VideoDataset(torch.utils.data.Dataset):
             label_col: str,
             clip_len: int,
             frame_sample_rate: int,
+            frame_sample_strategy: str = "uniform",
             video: bool = True,
             processor: transformers.image_processing_utils.BaseImageProcessor = None,
+            saliency_scores: pd.DataFrame = None,
             ) -> None:
         """
 
@@ -54,8 +56,12 @@ class VideoDataset(torch.utils.data.Dataset):
         self.labels = []
         self.clip_len = clip_len
         self.frame_sample_rate = frame_sample_rate
+        self.frame_sample_strategy = frame_sample_strategy
+        logging.info(f"Frame sample strategy: {self.frame_sample_strategy}")
         self.video = video
         self.processor = self.default if not processor else processor
+        if saliency_scores is not None:
+            self.saliency_scores = saliency_scores
 
 
         for _, (video_path, label) in data[[video_col, label_col]].iterrows():
@@ -111,14 +117,75 @@ class VideoDataset(torch.utils.data.Dataset):
         indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
         assert len(indices) == clip_len, f"Sampled {len(indices)} frames instead of {clip_len}."
         return indices
-    
+
+    def _sample_center_segment(self, clip_len, seg_len):
+        '''
+        Sample the segment of the video around the center frame.
+
+        Args:
+            clip_len (`int`): Total number of frames to sample.
+            seg_len (`int`): Maximum allowed index of sample's last frame.
+        '''
+
+        center_frame_idx = seg_len // 2
+        start_idx = max(0, center_frame_idx - clip_len // 2)
+        end_idx = min(seg_len, center_frame_idx + clip_len // 2)
+        indices = np.linspace(start_idx, end_idx, num=clip_len)
+        indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
+        assert len(indices) == clip_len, f"Sampled {len(indices)} frames instead of {clip_len}."
+        return indices
+
+    def _sample_salient_segment(self, clip_len, seg_len=None, saliency_sum=None):
+        '''
+        Sample the segment of the video containing the most salient frames.
+        This function must receive an array with the saliency score for each frame (understood as the sum of the saliency for every pixel in the frame).
+
+        Args:
+            clip_len (`int`): Total number of frames to sample.
+            seg_len (`int`): Maximum allowed index of sample's last frame. Added for compatibility with other sampling functions.
+            saliency_sum (`List[float]`): List of saliency scores for each frame.
+        '''
+        try:
+            # Normalize saliency sum to sum 1
+            saliency_sum_norm = [s / sum(saliency_sum) for s in saliency_sum]
+
+            # Select the clip_len frame window with highest saliency cumsum
+            window_saliency = []
+            for i in range(len(saliency_sum_norm) - clip_len):
+                window_saliency.append(sum(saliency_sum_norm[i:i+clip_len]))
+
+            # Get the index of the window with highest saliency
+            max_saliency_idx = np.argmax(window_saliency)
+            # Get the indices of the frames in the window
+            start_idx = max_saliency_idx
+            end_idx = max_saliency_idx + clip_len
+            indices = np.linspace(start_idx, end_idx, num=clip_len)
+            indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
+            assert len(indices) == clip_len, f"Sampled {len(indices)} frames instead of {clip_len}."
+            return indices
+        except Exception as e:
+            logging.error(f"Error sampling salient segment: {e}")
+            logging.error(f"clip_len: {clip_len}")
+            logging.error(f"seg_len: {seg_len}")
+            logging.error(f"saliency_sum: {saliency_sum}")
+            logging.error(f"Resorting to center segment sampling")
+            return self._sample_center_segment(clip_len, seg_len)
+
     def _get_item_from_video(self, idx):
         """
         Load video from video file
         """
         # Use yuvj420p format to avoid errors with some videos
         container = av.open(self.videos[idx], format='mp4', mode='r')
-        indices = self._sample_frame_indices(self.clip_len, self.frame_sample_rate, container.streams.video[0].frames)
+        if self.frame_sample_strategy == "uniform":
+            indices = self._sample_frame_indices(self.clip_len, self.frame_sample_rate, container.streams.video[0].frames)
+        elif self.frame_sample_strategy == "center":
+            indices = self._sample_center_segment(self.clip_len, container.streams.video[0].frames)
+        elif self.frame_sample_strategy == "salient":
+            # Salient scores is a pandas Series with filename as index and a list of saliency scores for each frame as values
+            indices = self._sample_salient_segment(self.clip_len, container.streams.video[0].frames, self.saliency_scores[self.videos[idx]])
+        else:
+            raise ValueError(f"Invalid frame sample strategy: {self.frame_sample_strategy}")
         video = self._read_video_pyav(container, indices)
         # If len(video) < clip_len, repeat the last frame until it reaches clip_len
         if len(video) < self.clip_len:
@@ -146,7 +213,15 @@ class VideoDataset(torch.utils.data.Dataset):
             for file in files:
                 if file.endswith(('.jpg', '.png', '.jpeg')):
                     frames.append(os.path.join(root, file))
-        indices = self._sample_frame_indices(self.clip_len, self.frame_sample_rate, len(frames))
+        if self.frame_sample_strategy == "uniform":
+            indices = self._sample_frame_indices(self.clip_len, self.frame_sample_rate, len(frames))
+        elif self.frame_sample_strategy == "center":
+            indices = self._sample_center_segment(self.clip_len, len(frames))
+        elif self.frame_sample_strategy == "salient":
+            # Salient scores is a pandas Series with filename as index and a list of saliency scores for each frame as values
+            indices = self._sample_salient_segment(self.clip_len, len(frames), self.saliency_scores[self.videos[idx]])
+        else:
+            raise ValueError(f"Invalid frame sample strategy: {self.frame_sample_strategy}")
         # Load each frame into a numpy array if the index coincides with the filename (frame_0{i}})
         video = []
         for frame in frames:
@@ -209,7 +284,8 @@ class CustomTrainer(Trainer):
                 self.model.config.num_frames,
                 self.train_dataset.frame_sample_rate,
                 video=False,
-                processor=self.train_dataset.processor
+                processor=self.train_dataset.processor,
+                frame_sample_strategy=self.train_dataset.frame_sample_strategy
             )
         super().train(resume_from_checkpoint=None, trial=trial)
 
@@ -226,7 +302,8 @@ class CustomTrainer(Trainer):
                 self.model.config.num_frames,
                 self.eval_dataset.frame_sample_rate,
                 video=False,
-                processor=self.eval_dataset.processor
+                processor=self.eval_dataset.processor,
+                frame_sample_strategy=self.eval_dataset.frame_sample_strategy
             )
         return super().evaluate(eval_dataset, ignore_keys)
 
@@ -286,14 +363,14 @@ def model_init(trial):
 def model_init_finetune(trial):
     model = VivitForVideoClassification.from_pretrained(
         "google/vivit-b-16x2-kinetics400", num_labels=1, ignore_mismatched_sizes=True)
-    # Freeze all layers except last encoder and regression head
-    for param in model.parameters():
-        param.requires_grad = False
-    for param in model.classifier.parameters():
-        param.requires_grad = True
-    # Unfreeze last three transformer blocks
-    for param in model.vivit.encoder.layer[-5:].parameters():
-        param.requires_grad = True
+    # # Freeze all layers except last encoder and regression head
+    # for param in model.parameters():
+    #     param.requires_grad = False
+    # for param in model.classifier.parameters():
+    #     param.requires_grad = True
+    # # Unfreeze last three transformer blocks
+    # for param in model.vivit.encoder.layer[-5:].parameters():
+    #     param.requires_grad = True
     # Append sigmoid activation to regression head
     model.classifier = nn.Sequential(model.classifier, nn.Sigmoid())
     return model
@@ -345,9 +422,11 @@ def check_cpu_usage(logging):
 @click.option('--finetune', type=click.BOOL, default=False)
 @click.option('--batch_size', type=click.INT, default=4)
 @click.option('--learning_rate', type=click.FLOAT, default=1e-5)
-@click.option('--num_epochs', type=click.INT, default=1)
+@click.option('--num_epochs', type=click.INT, default=50)
 @click.option('--sample', type=click.FLOAT, default=1)
-def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune, learning_rate, batch_size, num_epochs, sample):
+@click.option('--frame_sample_strategy', type=click.STRING, default="uniform")
+@click.option('--saliency_scores', type=click.Path(exists=True), default=None)
+def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune, learning_rate, batch_size, num_epochs, sample, frame_sample_strategy, saliency_scores):
     # Setup logging using click
     log_file = os.path.join(log_dir, f"logging-{exp_name}.log")
     logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -363,6 +442,8 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     logging.info(f'num epochs is: {num_epochs}')
     logging.info(f'sample is: {sample}')
     logging.info(f'param search is: {param_search}')
+    logging.info(f'frame sample strategy is: {frame_sample_strategy}')
+    logging.info(f'saliency scores is: {saliency_scores}')
 
     logging.info(f"Is CUDA available? {torch.cuda.is_available()}")
     if torch.cuda.is_available():
@@ -379,7 +460,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     logging.info(f"Transformers version: {transformers.__version__}")
     logging.info(f"Python version: {os.popen('python --version').read()}")
 
-    os.environ["WANDB_LOG_MODEL"] = "end"
+    os.environ["WANDB_LOG_MODEL"] = "epoch"
 
     BASE_DIR = base_dir
     if not video_dir:
@@ -402,8 +483,8 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
         if not finetune:
             model_ft = VivitForVideoClassification(config)
         else:
-            model_ft = VivitForVideoClassification.from_pretrained(
-                model_ckpt, num_labels=1, ignore_mismatched_sizes=True)
+            # model_ft = VivitForVideoClassification.from_pretrained(
+            #     model_ckpt, num_labels=1, ignore_mismatched_sizes=True)
             # check_cpu_usage(logging)
             if torch.cuda.is_available():
                 logging.info(f"Current GPU memory usage: {torch.cuda.memory_allocated(torch.device('cuda'))/1024**3} GB")
@@ -412,9 +493,9 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             #     param.requires_grad = False
             # for param in model_ft.classifier.parameters():
             #     param.requires_grad = True
-        num_frames_to_sample = model_ft.config.num_frames
+        num_frames_to_sample = config.num_frames
         sample_rate = image_processor.resample
-        model_ft.to(torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
+        # model_ft.to(torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
     else:
         num_frames_to_sample = config.num_frames
         sample_rate = image_processor.resample
@@ -439,10 +520,22 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             num_of_resampled_videos += 1
     logging.info(f"Replaced {num_of_resampled_videos} videos with their resampled versions.")
 
+    # If salient is chosen for frame_sample_strategy, load saliency scores
+    if frame_sample_strategy == "salient":
+        # Saliency scores is s adataframe that contains one row per frame. group by filename and store the scores for all frames in a list
+        logging.info("Loading saliency scores")
+        saliency_scores = pd.read_csv(saliency_scores)
+        saliency_scores = saliency_scores[['filename', 'frame_path_saliency']]
+        saliency_scores["filename"] = saliency_scores["filename"].apply(lambda x: video_path + x)
+        saliency_scores = saliency_scores.groupby('filename').frame_path_saliency.apply(list)
+        saliency_scores = saliency_scores.apply(lambda x: [float(s) for s in x])
+
     # check_cpu_usage(logging)
 
-    train_dataset = VideoDataset(train_data, 'filename', 'mem_score', num_frames_to_sample, sample_rate, video=True, processor=image_processor)
-    test_dataset = VideoDataset(test_data, 'filename', 'mem_score', num_frames_to_sample, sample_rate, video=True, processor=image_processor)
+    train_dataset = VideoDataset(
+        train_data, 'filename', 'mem_score', num_frames_to_sample, sample_rate, video=True, processor=image_processor, frame_sample_strategy=frame_sample_strategy, saliency_scores=saliency_scores)
+    test_dataset = VideoDataset(
+        test_data, 'filename', 'mem_score', num_frames_to_sample, sample_rate, video=True, processor=image_processor, frame_sample_strategy=frame_sample_strategy, saliency_scores=saliency_scores)
 
     # check_cpu_usage(logging)
 
@@ -463,7 +556,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             logging.info(f"Current GPU memory usage: {torch.cuda.memory_allocated(device)/1024**3} GB")
         # check_cpu_usage(logging)
 
-        optimizer = torch.optim.AdamW(model_ft.parameters(), lr=5e-5)
+        optimizer = torch.optim.AdamW(model_ft.parameters(), lr=learning_rate)
         criterion = nn.MSELoss()
 
         train_loader = train_dataset.load('train', batch_size=batch_size)
@@ -505,7 +598,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             evaluation_strategy="epoch",
             save_strategy="epoch",
             learning_rate=learning_rate,
-            num_train_epochs=20,
+            num_train_epochs=num_epochs,
             auto_find_batch_size=True,
             per_device_train_batch_size=32,
             per_device_eval_batch_size=32,
@@ -533,12 +626,12 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             data_collator=collate_fn,
             compute_metrics=compute_spearman,
             model_init=model_init if not finetune else model_init_finetune,
-            callbacks=[EarlyStoppingCallback(early_stopping_patience=3, early_stopping_threshold=0.001)],
+            callbacks=[EarlyStoppingCallback(early_stopping_patience=5, early_stopping_threshold=0.001)],
 
         )
 
         if not param_search:
-            wandb.init(project="huggingface", name=new_model_name, config=args, resume=False)
+            wandb.init(project="training-video-transformers-v3", name=new_model_name, config=args, resume=False)
             # wandb.init(project="huggingface", id="1rgqi7ax", resume="must")
             wandb.define_metric("eval/spearmanr", summary="max")
             if wandb.run.resumed:
