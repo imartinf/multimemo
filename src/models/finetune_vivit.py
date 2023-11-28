@@ -131,7 +131,7 @@ class VideoDataset(torch.utils.data.Dataset):
         start_idx = max(0, center_frame_idx - clip_len // 2)
         end_idx = min(seg_len, center_frame_idx + clip_len // 2)
         indices = np.linspace(start_idx, end_idx, num=clip_len)
-        indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
+        # indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
         assert len(indices) == clip_len, f"Sampled {len(indices)} frames instead of {clip_len}."
         return indices
 
@@ -192,6 +192,8 @@ class VideoDataset(torch.utils.data.Dataset):
             video = np.concatenate([np.repeat(video[-1:], self.clip_len - len(video), axis=0), video], axis=0)
             logging.warning(f"Video {self.videos[idx]} has less than {self.clip_len} frames. Repeating the last frame.")
             logging.warning(f"Video shape: {video.shape}")
+            logging.warning(f"Indices: {indices}")
+            logging.warning(f"Container frames: {container.streams.video[0].frames}")
         assert len(video) == self.clip_len, f"Video {self.videos[idx]} has {len(video)} frames instead of {self.clip_len}."
         label = torch.tensor(self.labels[idx]).float()
         inputs = self.processor(list(video), return_tensors='pt')
@@ -345,10 +347,12 @@ def compute_spearman(eval_pred):
 def model_init(trial):
     config = VivitConfig.from_pretrained("google/vivit-b-16x2-kinetics400")
     config.num_labels = 1
-    config.num_frames = 16
+    config.num_frames = 15
+    config.num_attention_heads = 8
+    config.num_hidden_layers = 8
     if trial is None or 'num_frames' not in trial.keys():
-        config.num_frames = 16
-        config.video_size = [16, 224, 224]
+        config.num_frames = 15
+        config.video_size = [15, 224, 224]
     if trial is not None:
         for k, v in trial.items():
         # Check if keys are in config
@@ -357,6 +361,7 @@ def model_init(trial):
         if config.num_frames != config.video_size[0]:
             config.video_size[0] = config.num_frames
     # Replace config values for trial values
+    wandb.config.update(config)
     model = VivitForVideoClassification(config)
     return model
 
@@ -386,15 +391,15 @@ def wandb_hp_space(trial):
         },
         "parameters": {
             # Epochs are ints
-            "num_train_epochs": {"value": 10},
+            # "num_train_epochs": {"value": 10},
             # "per_device_train_batch_size": {"value": 4},
-            "warmup_ratio": {'value': 0.4},
+            # "warmup_ratio": {'value': 0.4},
             # Set evaluation batch size equal to training batch size
             # "per_device_eval_batch_size": {"ref": "per_device_train_batch_size"},
-            "gradient_accumulation_steps": {"values": [1, 2, 4, 8, 16]},
+            # "gradient_accumulation_steps": {"values": [1, 2, 4, 8, 16]},
             # "warmup_ratio": {"values": [0.0, 0.1, 0.2, 0.3, 0.4]},
             "learning_rate": {"value": 1e-04},
-            "weight_decay": {"value": 0.0001},
+            # "weight_decay": {"value": 0.0001},
             # "num_frames": {"values": [2, 4, 8, 16, 32]},
         },
         "name": f"validation-gradient-accumulation-steps-finetune-{trial_name}-magerit",
@@ -459,7 +464,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     logging.info(f"PyTorch version: {torch.__version__}")
     logging.info(f"Transformers version: {transformers.__version__}")
     logging.info(f"Python version: {os.popen('python --version').read()}")
-
+    
     os.environ["WANDB_LOG_MODEL"] = "epoch"
 
     BASE_DIR = base_dir
@@ -477,7 +482,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     config = VivitConfig.from_pretrained(model_ckpt)
     if not finetune:
         config.num_labels = 1
-        config.num_frames = 16
+        config.num_frames = 15
 
     if not param_search:
         if not finetune:
@@ -522,7 +527,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
 
     # If salient is chosen for frame_sample_strategy, load saliency scores
     if frame_sample_strategy == "salient":
-        # Saliency scores is s adataframe that contains one row per frame. group by filename and store the scores for all frames in a list
+        # Saliency scores is a dataframe that contains one row per frame. group by filename and store the scores for all frames in a list
         logging.info("Loading saliency scores")
         saliency_scores = pd.read_csv(saliency_scores)
         saliency_scores = saliency_scores[['filename', 'frame_path_saliency']]
@@ -606,8 +611,8 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             #tf32=True,
             # Use SGD with momentum as optimizer and cosine scheduler with linear warmup
             # optim="sgd",
-            # lr_scheduler_type="cosine",
-            # warmup_ratio=0.1,
+            lr_scheduler_type="cosine",
+            warmup_ratio=0.02,
             logging_steps=10,
             logging_dir=os.path.join(BASE_DIR, "logs", new_model_name),
             load_best_model_at_end=True,
@@ -617,6 +622,7 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             run_name=new_model_name,
         )
 
+        wandb.init(project="training-video-transformers-v3", name=new_model_name, config=args, resume=False)
         trainer = CustomTrainer(
             None,
             args,
@@ -631,7 +637,6 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
         )
 
         if not param_search:
-            wandb.init(project="training-video-transformers-v3", name=new_model_name, config=args, resume=False)
             # wandb.init(project="huggingface", id="1rgqi7ax", resume="must")
             wandb.define_metric("eval/spearmanr", summary="max")
             if wandb.run.resumed:
