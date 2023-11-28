@@ -1,6 +1,8 @@
 import json
 import os
+import logging
 
+import av
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -12,7 +14,10 @@ from src.tools.utils import load_videomem
 
 
 def main(model_folder_path, data_path, video_folder_path, save_path, model_type="vivit"):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # Print logs to stdout
+    logging.basicConfig(level=logging.INFO)
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
     model_config_path = os.path.join(model_folder_path, "config.json")
     model_processor_config_path = os.path.join(model_folder_path, "preprocessor_config.json")
     model_weights_path = os.path.join(model_folder_path, "pytorch_model.bin")
@@ -64,7 +69,7 @@ def main(model_folder_path, data_path, video_folder_path, save_path, model_type=
     )
 
     # Evaluate model on data
-    # Te result must be a dict {video_id: prediction}
+    # The result must be a dict {video_id: prediction}
     model.eval()
     predictions = {}
 
@@ -92,6 +97,6 @@ if __name__ == "__main__":
     main(
         model_folder_path="/mnt/rufus_A/models/vivit-finetune-memento-center-segment",
         data_path="/mnt/rufus_A/VIDEOMEM23/testing_set/test-set_videos-captions.txt",
-        video_folder_path="/mnt/rufus_A/VIDEOMEM23/testing_set/Videos/sources",
+        video_folder_path="/mnt/rufus_A/VIDEOMEM/test-set/Videos/",
         save_path="/mnt/rufus_A/multimemo/runs/vivit-finetune-memento-center-segment/me23mem-THAU-UPM-subtask1-runfViViTCenteredSegment.csv",
     )

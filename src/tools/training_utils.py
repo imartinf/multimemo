@@ -129,7 +129,17 @@ class VideoDataset(torch.utils.data.Dataset):
         """
         # Use yuvj420p format to avoid errors with some videos
         format = self.videos[idx].split(".")[-1]
-        container = av.open(self.videos[idx], format=format, mode="r")
+        try:
+            container = av.open(self.videos[idx], format=format, mode="r")
+        except Exception as e:
+            # If the video is video4592 change the path
+            if "video4592" in self.videos[idx]:
+                self.videos[idx] = "/mnt/rufus_A/VIDEOMEM/test-set/Videos/video4592.webm"
+                container = av.open(self.videos[idx], format=format, mode="r")
+            else:
+                logging.error(f"Error opening video {self.videos[idx]}: {e}")
+                logging.error(f"Skipping video {self.videos[idx]}")
+                return None, None
         # Get number of frames
         total_frames = 24 * 7 if format == "webm" else container.streams.video[0].frames
         if self.frame_sample_strategy == "uniform":
