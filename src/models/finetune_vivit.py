@@ -22,292 +22,8 @@ from transformers import (AutoConfig, AutoModel, EarlyStoppingCallback, Trainer,
 
 import wandb
 
-
-class VideoDataset(torch.utils.data.Dataset):
-    default = VivitImageProcessor.from_pretrained("google/vivit-b-16x2-kinetics400")
-
-    """
-    Dataset class to handle video loading and preprocessing.
-    Receives a dictionary in which the key is the path to the video and the value is the label.
-
-    When the dataset is loaded, the videos are processed using an image processor (default is VivitImageProcessor).
-
-    The result is a dictionary with the following keys:
-        - pixel_values: tensor of shape (n_frames, n_channels, height, width)
-        - label: tensor of shape (1)
-    """
-
-    def __init__(
-            self,
-            data: pd.DataFrame,
-            video_col: str,
-            label_col: str,
-            clip_len: int,
-            frame_sample_rate: int,
-            frame_sample_strategy: str = "uniform",
-            video: bool = True,
-            processor: transformers.image_processing_utils.BaseImageProcessor = None,
-            saliency_scores: pd.DataFrame = None,
-            ) -> None:
-        """
-
-        """
-        self.videos = []
-        self.labels = []
-        self.clip_len = clip_len
-        self.frame_sample_rate = frame_sample_rate
-        self.frame_sample_strategy = frame_sample_strategy
-        logging.info(f"Frame sample strategy: {self.frame_sample_strategy}")
-        self.video = video
-        self.processor = self.default if not processor else processor
-        if saliency_scores is not None:
-            self.saliency_scores = saliency_scores
-
-
-        for _, (video_path, label) in data[[video_col, label_col]].iterrows():
-            # Append path if self.video is True, otherwise append path without extension
-            self.videos.append(os.path.splitext(video_path)[0] if not self.video else video_path)
-            self.labels.append(label)
-
-    def _read_video_pyav(self, container, indices):
-        '''
-        Decode the video with PyAV decoder.
-        Args:
-            container (`av.container.input.InputContainer`): PyAV container.
-            indices (`List[int]`): List of frame indices to decode.
-        Returns:
-            result (np.ndarray): np array of decoded frames of shape (num_frames, height, width, 3).
-        '''
-        frames = []
-        container.seek(0)
-        start_index = indices[0]
-        end_index = indices[-1]
-        for i, frame in enumerate(container.decode(video=0)):
-            if i > end_index:
-                break
-            if i >= start_index and i in indices:
-                frames.append(frame)
-        return np.stack([x.to_ndarray(format="rgb24") for x in frames])
-
-    def _sample_frame_indices(self, clip_len, frame_sample_rate, seg_len):
-        '''
-        Sample a given number of frame indices from the video.
-        Args:
-            clip_len (`int`): Total number of frames to sample.
-            frame_sample_rate (`int`): Sample every n-th frame.
-            seg_len (`int`): Maximum allowed index of sample's last frame.
-        Returns:
-            indices (`List[int]`): List of sampled frame indices
-        '''
-        converted_len = int(clip_len * frame_sample_rate)
-        if converted_len >= seg_len:
-            # If there are not enough frames, sample uniformly from the entire video and forget about frame_sample_rate
-            # This is the case for short videos
-            # return np.linspace(0, seg_len, num=clip_len, endpoint=False, dtype=np.int64)
-            # If there are not enough frames return a shorter list of indices (later they will be repeated)
-            # This is the case for short videos
-            start_idx = 0
-            end_idx = seg_len
-            indices = np.linspace(start_idx, end_idx, num=clip_len)
-            indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
-            return indices
-        end_idx = np.random.randint(converted_len, seg_len)
-        start_idx = end_idx - converted_len
-        indices = np.linspace(start_idx, end_idx, num=clip_len)
-        indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
-        assert len(indices) == clip_len, f"Sampled {len(indices)} frames instead of {clip_len}."
-        return indices
-
-    def _sample_center_segment(self, clip_len, seg_len):
-        '''
-        Sample the segment of the video around the center frame.
-
-        Args:
-            clip_len (`int`): Total number of frames to sample.
-            seg_len (`int`): Maximum allowed index of sample's last frame.
-        '''
-
-        center_frame_idx = seg_len // 2
-        start_idx = max(0, center_frame_idx - clip_len // 2)
-        end_idx = min(seg_len, center_frame_idx + clip_len // 2)
-        indices = np.linspace(start_idx, end_idx, num=clip_len)
-        # indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
-        assert len(indices) == clip_len, f"Sampled {len(indices)} frames instead of {clip_len}."
-        return indices
-
-    def _sample_salient_segment(self, clip_len, seg_len=None, saliency_sum=None):
-        '''
-        Sample the segment of the video containing the most salient frames.
-        This function must receive an array with the saliency score for each frame (understood as the sum of the saliency for every pixel in the frame).
-
-        Args:
-            clip_len (`int`): Total number of frames to sample.
-            seg_len (`int`): Maximum allowed index of sample's last frame. Added for compatibility with other sampling functions.
-            saliency_sum (`List[float]`): List of saliency scores for each frame.
-        '''
-        try:
-            # Normalize saliency sum to sum 1
-            saliency_sum_norm = [s / sum(saliency_sum) for s in saliency_sum]
-
-            # Select the clip_len frame window with highest saliency cumsum
-            window_saliency = []
-            for i in range(len(saliency_sum_norm) - clip_len):
-                window_saliency.append(sum(saliency_sum_norm[i:i+clip_len]))
-
-            # Get the index of the window with highest saliency
-            max_saliency_idx = np.argmax(window_saliency)
-            # Get the indices of the frames in the window
-            start_idx = max_saliency_idx
-            end_idx = max_saliency_idx + clip_len
-            indices = np.linspace(start_idx, end_idx, num=clip_len)
-            indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
-            assert len(indices) == clip_len, f"Sampled {len(indices)} frames instead of {clip_len}."
-            return indices
-        except Exception as e:
-            logging.error(f"Error sampling salient segment: {e}")
-            logging.error(f"clip_len: {clip_len}")
-            logging.error(f"seg_len: {seg_len}")
-            logging.error(f"saliency_sum: {saliency_sum}")
-            logging.error(f"Resorting to center segment sampling")
-            return self._sample_center_segment(clip_len, seg_len)
-
-    def _get_item_from_video(self, idx):
-        """
-        Load video from video file
-        """
-        # Use yuvj420p format to avoid errors with some videos
-        container = av.open(self.videos[idx], format='mp4', mode='r')
-        if self.frame_sample_strategy == "uniform":
-            indices = self._sample_frame_indices(self.clip_len, self.frame_sample_rate, container.streams.video[0].frames)
-        elif self.frame_sample_strategy == "center":
-            indices = self._sample_center_segment(self.clip_len, container.streams.video[0].frames)
-        elif self.frame_sample_strategy == "salient":
-            # Salient scores is a pandas Series with filename as index and a list of saliency scores for each frame as values
-            indices = self._sample_salient_segment(self.clip_len, container.streams.video[0].frames, self.saliency_scores[self.videos[idx]])
-        else:
-            raise ValueError(f"Invalid frame sample strategy: {self.frame_sample_strategy}")
-        video = self._read_video_pyav(container, indices)
-        # If len(video) < clip_len, repeat the last frame until it reaches clip_len
-        if len(video) < self.clip_len:
-            video = np.concatenate([np.repeat(video[-1:], self.clip_len - len(video), axis=0), video], axis=0)
-            logging.warning(f"Video {self.videos[idx]} has less than {self.clip_len} frames. Repeating the last frame.")
-            logging.warning(f"Video shape: {video.shape}")
-            logging.warning(f"Indices: {indices}")
-            logging.warning(f"Container frames: {container.streams.video[0].frames}")
-        assert len(video) == self.clip_len, f"Video {self.videos[idx]} has {len(video)} frames instead of {self.clip_len}."
-        label = torch.tensor(self.labels[idx]).float()
-        inputs = self.processor(list(video), return_tensors='pt')
-        inputs = {k: val.squeeze() for k, val in inputs.items()}
-        return inputs, label
-    
-    def _get_item_from_folder(self, idx):
-        """
-        Load video from folder with frames
-        """
-        frames = []
-        # Search for a folder named frames inside the video folder
-        for root, dirs, files in os.walk(self.videos[idx]):
-            if 'frames' in dirs:
-                frames_path = os.path.join(root, 'frames')
-                break
-        # Get all frames in the folder
-        for root, _, files in os.walk(frames_path):
-            for file in files:
-                if file.endswith(('.jpg', '.png', '.jpeg')):
-                    frames.append(os.path.join(root, file))
-        if self.frame_sample_strategy == "uniform":
-            indices = self._sample_frame_indices(self.clip_len, self.frame_sample_rate, len(frames))
-        elif self.frame_sample_strategy == "center":
-            indices = self._sample_center_segment(self.clip_len, len(frames))
-        elif self.frame_sample_strategy == "salient":
-            # Salient scores is a pandas Series with filename as index and a list of saliency scores for each frame as values
-            indices = self._sample_salient_segment(self.clip_len, len(frames), self.saliency_scores[self.videos[idx]])
-        else:
-            raise ValueError(f"Invalid frame sample strategy: {self.frame_sample_strategy}")
-        # Load each frame into a numpy array if the index coincides with the filename (frame_0{i}})
-        video = []
-        for frame in frames:
-            # Get the filename from the frame path and extract the index
-            frame_idx = int(re.findall(r'\d+', os.path.splitext(os.path.basename(frame))[0])[0])
-            if frame_idx in indices:
-                img = Image.open(frame)
-                # img = np.array(img)
-                video.append(img)
-        # video = np.stack(video)
-        # If len(video) < clip_len, repeat the last frame until it reaches clip_len (as Image, not np.array)
-        if len(video) < self.clip_len:
-            video = [video[-1]] * (self.clip_len - len(video)) + video
-            logging.warning(f"Video {self.videos[idx]} has less than {self.clip_len} frames. Repeating the last frame.")
-            logging.warning(f"Video shape: {len(video)}")
-        assert len(video) == self.clip_len, f"Video {self.videos[idx]} has {len(video)} frames instead of {self.clip_len}."
-        label = torch.tensor(self.labels[idx]).float()
-        inputs = self.processor(video, return_tensors='pt')
-        inputs = {k: val.squeeze()
-                   for k, val in inputs.items()}
-        return inputs, label
-
-    def __len__(self) -> int:
-        return len(self.videos)
-
-    def __getitem__(self, idx: int):
-        # device = "cuda" if torch.cuda.is_available() else "cpu"
-        return self._get_item_from_video(idx) if self.video else self._get_item_from_folder(idx)
-        
-
-    def load(self, phase: str = 'train', batch_size: int = 32,
-                num_workers: int = 0) -> torch.utils.data.DataLoader:
-            """Retrieve a DataLoader to ease the pipeline.
-
-            Args:
-                phase: Whether it's train or test.
-                batch_size: Samples per batch.
-                num_workers: Cores to use.
-
-            Returns:
-                an iterable torch DataLoader.
-            """
-            shuffle = True if phase == "train" else False
-            return torch.utils.data.DataLoader(dataset=self, batch_size=batch_size,
-                            shuffle=shuffle, num_workers=num_workers)
-
-
-class CustomTrainer(Trainer):
-    # Override train method
-    def train(self, model_path=None, trial=None, **kwargs):
-        self.model = self.model_init(trial)
-        # Check if self.model.num_frames equals the appropriate dimension of the data
-        # If not, reload the dataset with the correct num_frames
-        if self.model.config.num_frames != self.train_dataset[0][0]['pixel_values'].shape[0]:
-            logging.info(f"Reloading dataset with num_frames={self.model.config.num_frames} (original num_frames={self.train_dataset[0][0]['pixel_values'].shape[0]})")
-            self.train_dataset = VideoDataset(
-                pd.DataFrame({'video': self.train_dataset.videos, 'label': self.train_dataset.labels}),
-                'video',
-                'label',
-                self.model.config.num_frames,
-                self.train_dataset.frame_sample_rate,
-                video=False,
-                processor=self.train_dataset.processor,
-                frame_sample_strategy=self.train_dataset.frame_sample_strategy
-            )
-        super().train(resume_from_checkpoint=None, trial=trial)
-
-    # Override evaluate method
-    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix=None):
-        # Check if self.model.num_frames equals the appropriate dimension of the data
-        # If not, reload the dataset with the correct num_frames
-        if self.model.config.num_frames != self.eval_dataset[0][0]['pixel_values'].shape[0]:
-            logging.info(f"Reloading dataset with num_frames={self.model.config.num_frames} (original num_frames={self.eval_dataset[0][0]['pixel_values'].shape[0]})")
-            self.eval_dataset = VideoDataset(
-                pd.DataFrame({'video': self.eval_dataset.videos, 'label': self.eval_dataset.labels}),
-                'video',
-                'label',
-                self.model.config.num_frames,
-                self.eval_dataset.frame_sample_rate,
-                video=False,
-                processor=self.eval_dataset.processor,
-                frame_sample_strategy=self.eval_dataset.frame_sample_strategy
-            )
-        return super().evaluate(eval_dataset, ignore_keys)
+from tools.training_utils import VideoDataset, CustomTrainer
+from tools.video_processing import create_segment_database
 
 # Function to generate a random number between 0 and 1
 def generate_random_number():
@@ -535,12 +251,33 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
         saliency_scores = saliency_scores.groupby('filename').frame_path_saliency.apply(list)
         saliency_scores = saliency_scores.apply(lambda x: [float(s) for s in x])
 
+    if frame_sample_strategy == "all-segments":
+        train_data = create_segment_database(train_data, 'filename', num_frames_to_sample, 5)
+
     # check_cpu_usage(logging)
 
     train_dataset = VideoDataset(
-        train_data, 'filename', 'mem_score', num_frames_to_sample, sample_rate, video=True, processor=image_processor, frame_sample_strategy=frame_sample_strategy, saliency_scores=saliency_scores)
+        train_data,
+        'filename',
+        'mem_score',
+        num_frames_to_sample,
+        sample_rate,
+        video=True,
+        processor=image_processor,
+        frame_sample_strategy=frame_sample_strategy,
+        saliency_scores=saliency_scores
+    )
     test_dataset = VideoDataset(
-        test_data, 'filename', 'mem_score', num_frames_to_sample, sample_rate, video=True, processor=image_processor, frame_sample_strategy=frame_sample_strategy, saliency_scores=saliency_scores)
+        test_data,
+        'filename',
+        'mem_score',
+        num_frames_to_sample,
+        sample_rate,
+        video=True,
+        processor=image_processor,
+        frame_sample_strategy="center" if frame_sample_strategy == "all-segments" else frame_sample_strategy,
+        saliency_scores=saliency_scores
+    )
 
     # check_cpu_usage(logging)
 
@@ -609,10 +346,9 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             per_device_eval_batch_size=32,
             #gradient_accumulation_steps=16,
             #tf32=True,
-            # Use SGD with momentum as optimizer and cosine scheduler with linear warmup
             # optim="sgd",
-            lr_scheduler_type="cosine",
-            warmup_ratio=0.02,
+            lr_scheduler_type="linear",
+            # warmup_ratio=0.02,
             logging_steps=10,
             logging_dir=os.path.join(BASE_DIR, "logs", new_model_name),
             load_best_model_at_end=True,
