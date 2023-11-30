@@ -7,6 +7,7 @@ from pathlib import Path
 
 import av
 import numpy as np
+import pandas as pd
 import torch
 from PIL import Image
 from torchvision import transforms
@@ -100,59 +101,68 @@ def sample_salient_segment(clip_len, seg_len=None, saliency_sum=None):
         return sample_center_segment(clip_len, seg_len)
     
 
-def collect_all_possible_segments(clip_len, seg_len, frame_overlap):
+def collect_all_possible_segments(clip_len, seg_len, frame_shift):
     '''
-    Collect all possible segments of a given length from a video.
+    Collect all possible segments of a given length from a video, formed by consecutive frames with a given overlap.
+    If the last segment is not long enough, the last index is repeated.
+    Segments are defined by their starting and ending index.
     Args:
         clip_len (`int`): Total number of frames to sample.
         seg_len (`int`): Maximum allowed index of sample's last frame.
-        frame_overlap (`int`): Number of frames to overlap between consecutive segments.
+        frame_shift (`int`): Number of frames to shift between consecutive segments.
     Returns:
         segments (`List[List[int]]`): List of all possible segments.
     '''
     segments = []
     start_idx = 0
-    end_idx = seg_len
+    end_idx = start_idx + clip_len
     while end_idx <= seg_len:
-        indices = np.linspace(start_idx, end_idx, num=clip_len)
-        indices = np.clip(indices, start_idx, end_idx - 1).astype(np.int64)
-        segments.append(indices)
-        start_idx += clip_len - frame_overlap
-        end_idx += clip_len - frame_overlap
+        segments.append((start_idx, end_idx))
+        start_idx += frame_shift
+        end_idx += frame_shift
+    # If the last segment is not long enough, repeat the last index
+    if end_idx > seg_len and start_idx < seg_len:
+        segments.append((start_idx, seg_len))
     return segments
 
-def create_segment_database(dataframe, video_col, clip_len, frame_overlap):
+
+def create_segment_database(dataframe, video_col, clip_len, frame_shift):
     '''
     Given a pandas DataFrame of videos, create a new DataFrame with all possible segments of a given length.
     Args:
         dataframe (`pandas.DataFrame`): DataFrame with videos.
         clip_len (`int`): Total number of frames to sample.
         seg_len (`int`): Maximum allowed index of sample's last frame.
-        frame_overlap (`int`): Number of frames to overlap between consecutive segments.
+        frame_shift (`int`): Number of frames to shift between consecutive segments.
     '''
 
+    print(f"Creating segment database with clip_len={clip_len}, frame_overlap={frame_shift}")
+    print(f"Total number of videos: {len(dataframe)}")
+
+    segments_df = pd.DataFrame(columns=dataframe.columns)
+
     # Create a new DataFrame with all possible segments
-    segments = []
     for idx, row in tqdm(dataframe.iterrows(), total=len(dataframe)):
         # Open video
         video_path = row[video_col]
         container = av.open(video_path)
         # Get video length
-        seg_len = len(container.streams.video[0])
+        seg_len = container.streams.video[0].frames
         # Get all possible segments
-        segments.extend(collect_all_possible_segments(clip_len, seg_len, frame_overlap))
+        segments = collect_all_possible_segments(clip_len, seg_len, frame_shift)
+        # For each segment in segments create a new row in the dataframe
+        for segment in segments:
+            new_row = row.copy()
+            new_row['start_idx'] = segment[0]
+            new_row['end_idx'] = segment[-1]
+            new_row['segment_id'] = f"{os.path.basename(row[video_col])}_{segment[0]}_{segment[-1]}"
+            segments_df = pd.concat([segments_df, pd.DataFrame(new_row).T], ignore_index=True)
+        container.close()
 
-    # Append segments to dataframe
-    segments_df = dataframe.copy()
-    segments_df['segments'] = segments
-    segments_df = segments_df.explode('segments')
-    segments_df = segments_df.reset_index(drop=True)
-    segments_df['segments'] = segments_df['segments'].apply(lambda x: x.tolist())
-    segments_df = segments_df.rename(columns={'segments': 'indices'})
-    # Create an id that identifies each segment in the context of the video
-    segments_df['segment_id'] = segments_df.apply(lambda x: f"{x[video_col]}_{x['indices'][0]}_{x['indices'][-1]}", axis=1)
+    print(f"Total number of segments: {len(segments_df)}")
+    print(f"Total number of videos: {len(segments_df[video_col].unique())}")
+    print(segments_df.groupby(video_col).size().describe())
     return segments_df
-
     
 
 

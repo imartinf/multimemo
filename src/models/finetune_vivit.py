@@ -22,8 +22,8 @@ from transformers import (AutoConfig, AutoModel, EarlyStoppingCallback, Trainer,
 
 import wandb
 
-from tools.training_utils import VideoDataset, CustomTrainer
-from tools.video_processing import create_segment_database
+from src.tools.training_utils import VideoDataset, CustomTrainer
+from src.tools.video_processing import create_segment_database
 
 # Function to generate a random number between 0 and 1
 def generate_random_number():
@@ -41,10 +41,8 @@ def create_dictionary_from_folder(folder_path):
     return video_dict
 
 def collate_fn(examples):
-
-    pixel_values = torch.stack(
-        [example[0]["pixel_values"] for example in examples]
-    )
+    pixels = [example[0]["pixel_values"] for example in examples]
+    pixel_values = torch.stack(pixels)
     labels = torch.tensor([example[1] for example in examples])
     return {"pixel_values": pixel_values, "labels": labels}
 

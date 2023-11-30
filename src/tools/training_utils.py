@@ -39,13 +39,15 @@ class VideoDataset(torch.utils.data.Dataset):
             frame_sample_strategy: str = "uniform",
             video: bool = True,
             processor: transformers.image_processing_utils.BaseImageProcessor = None,
-            saliency_scores: pd.DataFrame = None
+            saliency_scores: pd.DataFrame = None,
+            device: str = "cuda" if torch.cuda.is_available() else "cpu"
             ) -> None:
         """
 
         """
         self.videos = []
         self.labels = []
+        self.data = data
         self.clip_len = clip_len
         self.frame_sample_rate = frame_sample_rate
         self.frame_sample_strategy = frame_sample_strategy
@@ -54,6 +56,9 @@ class VideoDataset(torch.utils.data.Dataset):
         self.processor = self.default if not processor else processor
         if saliency_scores is not None:
             self.saliency_scores = saliency_scores
+        else:
+            self.saliency_scores = None
+        self.device = device
 
 
         for _, (video_path, label) in data[[video_col, label_col]].iterrows():
@@ -103,10 +108,10 @@ class VideoDataset(torch.utils.data.Dataset):
                         frames.append(os.path.join(root, file))
             container = frames
         if self.frame_sample_strategy == "all-segments": 
-            if "indices" in self.data.columns:
-                indices = self.data.loc[idx, "indices"]
+            if "start_idx" in self.data.columns and "end_idx" in self.data.columns:
+                indices = list(range(self.data.loc[idx, "start_idx"], self.data.loc[idx, "end_idx"]))
             else:
-                raise ValueError(f"Must provide indices column in dataframe when using frame_sample_strategy='all-segments'")
+                raise ValueError("start_idx and end_idx columns not found in data")
         elif self.frame_sample_strategy == "uniform":
             indices = sample_frame_indices(self.clip_len, self.frame_sample_rate, container.streams.video[0].frames)
         elif self.frame_sample_strategy == "center":
@@ -121,11 +126,11 @@ class VideoDataset(torch.utils.data.Dataset):
 
         # If len(video) < clip_len, repeat the last frame until it reaches clip_len
         if len(video) < self.clip_len:
-            video = np.concatenate([np.repeat(video[-1:], self.clip_len - len(video), axis=0), video], axis=0)
             logging.warning(f"Video {self.videos[idx]} has less than {self.clip_len} frames. Repeating the last frame.")
             logging.warning(f"Video shape: {video.shape}")
             logging.warning(f"Indices: {indices}")
             logging.warning(f"Container frames: {container.streams.video[0].frames}")
+            video = np.concatenate([np.repeat(video[-1:], self.clip_len - len(video), axis=0), video], axis=0)
 
         assert len(video) == self.clip_len, f"Video {self.videos[idx]} has {len(video)} frames instead of {self.clip_len}."
 
@@ -136,10 +141,14 @@ class VideoDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int):
         # device = "cuda" if torch.cuda.is_available() else "cpu"
-        return {
-            "pixel_values": self._get_item(idx),
-            "label": torch.tensor(self.labels[idx])
-        }
+        # Process video
+        video = self._get_item(idx)
+        # Process video
+        inputs = self.processor(list(video), return_tensors='pt')
+        inputs = {k: val.squeeze() for k, val in inputs.items()}
+        # Get label
+        label = torch.tensor(self.labels[idx]).float()
+        return inputs, label
         
 
     def load(self, phase: str = 'train', batch_size: int = 32,
