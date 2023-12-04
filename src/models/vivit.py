@@ -1,4 +1,5 @@
 from transformers import VivitForVideoClassification, VivitImageProcessor
+from transformers.modeling_outputs import ImageClassifierOutput
 import torch
 
 
@@ -16,72 +17,40 @@ class CustomVivit(VivitForVideoClassification):
         self.vivit_image_processor = VivitImageProcessor(config)
         self.vivit_image_processor.config = config
 
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        **kwargs
-    ):
+    def forward(self, video, **kwargs):
         """
         Override forward method so that, when a list of segments for the same video is passed, the forward method is
         called for each segment and the results are averaged.
-        :param input_ids:
-        :param attention_mask:
-        :param token_type_ids:
-        :param position_ids:
-        :param head_mask:
-        :param inputs_embeds:
-        :param labels:
-        :param output_attentions:
-        :param output_hidden_states:
-        :param return_dict:
-        :param kwargs:
-        :return:
+        :param video: List of segments for the same video
+        :param kwargs: Forward kwargs
+        :return: A tuple with the logits and the loss
         """
         # If input_ids is a list, then we are evaluating a list of segments for the same video
-        if isinstance(input_ids, list):
-            # Compute the forward pass for each segment and average the results
+        if isinstance(video, list):
             outputs = []
-            for segment_input_ids in input_ids:
+            for segment in video:
+                # Check if the segment has 5 dimensions and if it has 4 add a new dimension
+                if len(segment["pixel_values"].shape) == 4:
+                    segment["pixel_values"] = torch.unsqueeze(segment["pixel_values"], 0)
                 outputs.append(
                     self.vivit(
-                        input_ids=segment_input_ids,
-                        attention_mask=attention_mask,
-                        token_type_ids=token_type_ids,
-                        position_ids=position_ids,
-                        head_mask=head_mask,
-                        inputs_embeds=inputs_embeds,
-                        labels=labels,
-                        output_attentions=output_attentions,
-                        output_hidden_states=output_hidden_states,
-                        return_dict=return_dict,
-                        **kwargs
+                        **segment,
                     )
                 )
             # Average the results
             logits = torch.stack([output.logits for output in outputs]).mean(dim=0)
-            loss = torch.stack([output.loss for output in outputs]).mean(dim=0)
-            return self.vivit_image_processor.post_process(logits, loss)
+            if outputs[0].loss is None:
+                loss = None
+            else:
+                loss = torch.stack([output.loss for output in outputs if output.loss is not None]).mean(dim=0)
+            return ImageClassifierOutput(
+                loss=loss,
+                logits=logits,
+                hidden_states=None,
+                attentions=None,
+            )
         else:
             # If input_ids is not a list, then we are evaluating a single segment
             return self.vivit(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                token_type_ids=token_type_ids,
-                position_ids=position_ids,
-                head_mask=head_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                **kwargs
+                **video,
             )

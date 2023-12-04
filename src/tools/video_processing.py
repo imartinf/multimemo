@@ -149,7 +149,7 @@ def collect_all_possible_segments(clip_len, seg_len, frame_shift):
         start_idx += frame_shift
         end_idx += frame_shift
     # If the last segment is not long enough, repeat the last index
-    if end_idx > seg_len and start_idx < seg_len:
+    if (end_idx > seg_len) and seg_len - start_idx > 1:
         segments.append((start_idx, seg_len))
     return segments
 

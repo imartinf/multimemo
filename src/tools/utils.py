@@ -176,8 +176,8 @@ def load_memento(input_filepath, feat_cols):
             data = pd.concat([data1, data2]).reset_index(drop=True)
         elif "val" in input_filepath:
             # Load both train and val and concat them
-            data1 = load_data(input_filepath)
-            data2 = load_data(input_filepath.replace("val", "train"))
+            data2 = load_data(input_filepath)
+            data1 = load_data(input_filepath.replace("val", "train"))
             data = pd.concat([data1, data2]).reset_index(drop=True)
         else:
             data = load_data(input_filepath)
@@ -189,7 +189,10 @@ def load_memento(input_filepath, feat_cols):
                 except ValueError:
                     pass
         elif isinstance(feat_cols, str):
-            data[feat_cols] = data[feat_cols].apply(literal_eval)
+            try:
+                data[feat_cols] = data[feat_cols].apply(literal_eval)
+            except ValueError:
+                pass
         else:
             raise ValueError(f"feat_cols must be a list or a string, got {type(feat_cols)}")
         # Subsample if there are more than 3 unique frame_paths per video
@@ -205,7 +208,8 @@ def load_memento(input_filepath, feat_cols):
             if len(data) > data[first_feat_col].nunique():
                 data = data.drop_duplicates(subset=first_feat_col).reset_index(drop=True)
                 click.echo("Removed duplicates.")
-        data["frame_path"] = data["frame_path"].apply(lambda x: os.path.join("/mnt/rufus_A/Memento10k/videos", x))
+        if "frame_path" in data.columns:
+            data["frame_path"] = data["frame_path"].apply(lambda x: os.path.join("/mnt/rufus_A/Memento10k/videos", x))
         # Subsample for debugging
         # data_exp = data_exp.sample(256).reset_index(drop=True)
         # if isinstance(feat_cols, list):
