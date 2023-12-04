@@ -64,6 +64,8 @@ def main(model_folder_path, data_path, video_folder_path, save_path, model_type=
         model = VivitForVideoClassification(AutoConfig.from_pretrained(model_config_path)).to(device)
         model.classifier = nn.Sequential(model.classifier, nn.Sigmoid())
         model.load_state_dict(torch.load(model_weights_path, map_location=device))
+    else:
+        raise NotImplementedError(f"Model type {model_type} not implemented")
 
     # Load data
     data = load_videomem(data_path, "video")
