@@ -1,4 +1,3 @@
-
 from transformers import VivitImageProcessor, Trainer
 import torch
 
@@ -85,7 +84,7 @@ class VideoDataset(torch.utils.data.Dataset):
             if i >= start_index and i in indices:
                 frames.append(frame)
         return np.stack([x.to_ndarray(format="rgb24") for x in frames])
-
+      
     def _get_item(self, idx):
         """
         Load video from video file or folder
@@ -166,7 +165,6 @@ class VideoDataset(torch.utils.data.Dataset):
             shuffle = True if phase == "train" else False
             return torch.utils.data.DataLoader(dataset=self, batch_size=batch_size,
                             shuffle=shuffle, num_workers=num_workers)
-    
 
 class CustomTrainer(Trainer):
     # Override train method

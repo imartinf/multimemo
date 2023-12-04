@@ -3,22 +3,15 @@ import os
 import random
 import time
 
-import av
 import click
 import evaluate
-import numpy as np
 import pandas as pd
-import regex as re
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import transformers
-from PIL import Image
 import psutil
 from tqdm import tqdm
-from transformers import (AutoConfig, AutoModel, EarlyStoppingCallback, Trainer, TrainingArguments,
-                          VivitConfig, VivitForVideoClassification,
-                          VivitImageProcessor, VivitModel)
+from transformers import TrainingArguments, VivitConfig, VivitForVideoClassification, VivitImageProcessor
 
 import wandb
 
@@ -29,34 +22,37 @@ from src.tools.video_processing import create_segment_database
 def generate_random_number():
     return random.uniform(0, 1)
 
+
 # Function to scan a folder and create a dictionary
 def create_dictionary_from_folder(folder_path):
     video_dict = {}
     for root, _, files in os.walk(folder_path):
         for file in files:
-            if file.endswith(('.mp4', '.avi', '.mkv', '.mov')):
+            if file.endswith((".mp4", ".avi", ".mkv", ".mov")):
                 video_path = os.path.join(root, file)
                 random_number = generate_random_number()
                 video_dict[video_path] = random_number
     return video_dict
 
+
 def collate_fn(examples):
-    pixels = [example[0]["pixel_values"] for example in examples]
-    pixel_values = torch.stack(pixels)
+    pixel_values = torch.stack([example[0]["pixel_values"] for example in examples])
     labels = torch.tensor([example[1] for example in examples])
     return {"pixel_values": pixel_values, "labels": labels}
+
 
 def compute_spearman(eval_pred):
     metric = evaluate.load("spearmanr")
     try:
         logits, labels = eval_pred
-    except:
+    except BaseException:
         try:
             logits, labels = eval_pred.predictions, eval_pred.label_ids
-        except:
+        except BaseException:
             logging.error("Error getting logits and labels")
             exit()
     return metric.compute(predictions=logits, references=labels)
+
 
 def model_init(trial):
     config = VivitConfig.from_pretrained("google/vivit-b-16x2-kinetics400")
@@ -69,7 +65,7 @@ def model_init(trial):
         config.video_size = [15, 224, 224]
     if trial is not None:
         for k, v in trial.items():
-        # Check if keys are in config
+            # Check if keys are in config
             if k in config.to_dict():
                 setattr(config, k, v)
         if config.num_frames != config.video_size[0]:
@@ -79,30 +75,20 @@ def model_init(trial):
     model = VivitForVideoClassification(config)
     return model
 
+
 def model_init_finetune(trial):
     model = VivitForVideoClassification.from_pretrained(
         "google/vivit-b-16x2-kinetics400", num_labels=1, ignore_mismatched_sizes=True)
-    # # Freeze all layers except last encoder and regression head
-    # for param in model.parameters():
-    #     param.requires_grad = False
-    # for param in model.classifier.parameters():
-    #     param.requires_grad = True
-    # # Unfreeze last three transformer blocks
-    # for param in model.vivit.encoder.layer[-5:].parameters():
-    #     param.requires_grad = True
-    # Append sigmoid activation to regression head
     model.classifier = nn.Sequential(model.classifier, nn.Sigmoid())
     return model
+
 
 def wandb_hp_space(trial):
     # Get a unique trial name across all trials
     trial_name = wandb.util.generate_id()
     return {
         "method": "grid",
-        "metric": {
-            "name": "eval/spearmanr",
-            "goal": "maximize"
-        },
+        "metric": {"name": "eval/spearmanr", "goal": "maximize"},
         "parameters": {
             # Epochs are ints
             # "num_train_epochs": {"value": 10},
@@ -119,7 +105,8 @@ def wandb_hp_space(trial):
         "name": f"validation-gradient-accumulation-steps-finetune-{trial_name}-magerit",
     }
 
-def check_cpu_usage(logging):
+
+def check_cpu_usage(logger):
     # Get current CPU usage
     cpu_usage = psutil.cpu_percent()
     logging.info(f"Current CPU usage: {cpu_usage}%")
@@ -130,10 +117,11 @@ def check_cpu_usage(logging):
         cpu_usage = psutil.cpu_percent()
         logging.info(f"Current CPU usage: {cpu_usage}%")
 
+
 @click.command()
-@click.argument('base_dir', type=click.Path(exists=True))
-@click.argument('exp_name', type=click.STRING)
-@click.argument('log_dir', type=click.Path(writable=True))
+@click.argument("base_dir", type=click.Path(exists=True))
+@click.argument("exp_name", type=click.STRING)
+@click.argument("log_dir", type=click.Path(writable=True))
 # video_dir defaults to base_dir
 @click.option('--video_dir', type=click.Path(exists=True), default=None)
 @click.option('--method', type=click.STRING, default='pytorch')
@@ -225,8 +213,8 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
     test_data = pd.read_json(os.path.join(video_dir, "memento_val_data.json")).sample(frac=sample)
     # check_cpu_usage(logging)
 
-    train_data['filename'] = train_data['filename'].apply(lambda x: video_path + x)
-    test_data['filename'] = test_data['filename'].apply(lambda x: video_path + x)
+    train_data["filename"] = train_data["filename"].apply(lambda x: video_path + x)
+    test_data["filename"] = test_data["filename"].apply(lambda x: video_path + x)
 
     # Search inside the video folder for videos ending in _resampled.mp4 and substitute the original video for it
     # This is done to avoid errors with some videos
@@ -299,8 +287,8 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
         optimizer = torch.optim.AdamW(model_ft.parameters(), lr=learning_rate)
         criterion = nn.MSELoss()
 
-        train_loader = train_dataset.load('train', batch_size=batch_size)
-        test_loader = test_dataset.load('test', batch_size=batch_size)
+        train_loader = train_dataset.load("train", batch_size=batch_size)
+        test_loader = test_dataset.load("test", batch_size=batch_size)
 
         for epoch in range(num_epochs):
             logging.info(f"Epoch {epoch}")
@@ -327,8 +315,8 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
                     logging.info(f"Epoch {epoch} | Batch {i} | Labels: {labels.squeeze()}")
                     spearman = metric.compute(predictions=preds, references=labels.squeeze())
                     logging.info(f"Epoch {epoch} | Spearman: {spearman}")
-    
-    elif method == 'transformers':
+
+    elif method == "transformers":
         # Train using transformers Trainer
         # Wandb should report metrics for best epoch, not last epoch
         logging.info("Training using transformers Trainer")
@@ -367,7 +355,6 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
             compute_metrics=compute_spearman,
             model_init=model_init if not finetune else model_init_finetune,
             callbacks=[EarlyStoppingCallback(early_stopping_patience=5, early_stopping_threshold=0.001)],
-
         )
 
         if not param_search:
@@ -398,17 +385,13 @@ def main(base_dir, exp_name, log_dir, video_dir, method, param_search, finetune,
                 # compute_objective=compute_spearman,
                 # hp_name=new_model_name,
                 project="training-video-transformers-v3",
-                metric="eval/spearmanr"
+                metric="eval/spearmanr",
             )
             # Save results
             logging.info(best_trial)
 
     logging.info("Finished training")
-    
-    
 
-
-        
 
 if __name__ == "__main__":
     main()
